@@ -91,3 +91,112 @@ jobs:
           name: "panda3d-windows-wheel"
           path: "panda3d-1.11.0-cp311-cp311-win_amd64.whl"
           if-no-files-found: "error"
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout files
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update && \
+          sudo apt-get install -y \
+            fakeroot \
+            ffmpeg \
+            libassimp-dev \
+            libavformat-dev \
+            libbullet-dev \
+            libeigen3-dev \
+            libgl1-mesa-dev \
+            libgtk-3-dev \
+            libode-dev \
+            libopenal-dev \
+            libopus-dev \
+            libopusfile-dev \
+            libsquish-dev \
+            libswresample-dev \
+            libswscale-dev \
+            libvorbis-dev \
+            nvidia-cg-toolkit \
+            patchelf
+
+      - name: Build Panda
+        run: |
+          python makepanda/makepanda.py \
+            --installer \
+            --wheel \
+            --optimize 3 \
+            --lzma \
+            --threads=4 \
+            --nothing \
+            --use-python \
+            --use-direct \
+            --use-gl \
+            --use-gles \
+            --use-gles2 \
+            --use-dx9 \
+            --use-tinydisplay \
+            --use-nvidiacg \
+            --use-egl \
+            --use-eigen \
+            --use-openal \
+            --use-vorbis \
+            --use-opus \
+            --use-ffmpeg \
+            --use-swscale \
+            --use-swresample \
+            --use-ode \
+            --use-bullet \
+            --use-pandaphysics \
+            --use-speedtree \
+            --use-zlib \
+            --use-png \
+            --use-jpeg \
+            --use-tiff \
+            --use-openexr \
+            --use-squish \
+            --use-assimp \
+            --use-egg \
+            --use-freetype \
+            --use-harfbuzz \
+            --use-openssl \
+            --use-directcam \
+            --use-vision \
+            --use-gtk3 \
+            --use-mfc \
+            --use-wx \
+            --use-fltk \
+            --use-cocoa \
+            --use-x11 \
+            --use-pandatool \
+            --use-pview \
+            --use-deploytools \
+            --use-skel \
+            --use-pandafx \
+            --use-pandaparticlesystem \
+            --use-contrib \
+            --use-sse2 \
+            --use-neon \
+            --use-toontown \
+            --python-incdir="$pythonLocation/include" \
+            --python-libdir="$pythonLocation/lib"
+            
+      - name: "Upload Installer"
+        uses: actions/upload-artifact@v4
+        with:
+          name: "panda3d-linux-installer"
+          path: "panda3d1.11_1.11.0_amd64.deb"
+          if-no-files-found: "error"
+
+      - name: "Upload Wheel"
+        uses: actions/upload-artifact@v4
+        with:
+          name: "panda3d-linux-wheel"
+          path: "panda3d-1.11.0-cp311-cp311-linux_x86_64.whl"
+          if-no-files-found: "error"
