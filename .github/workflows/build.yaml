@@ -12,7 +12,8 @@ jobs:
         run: |
           $wc = New-Object System.Net.WebClient
           $wc.DownloadFile("https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-win64.zip", "thirdparty-tools.zip")
-          Expand-Archive -Path thirdparty-tools.zip
+          Add-Type -Assembly "System.IO.Compression.Filesystem"
+          [System.IO.Compression.ZipFile]::ExtractToDirectory("thirdparty-tools.zip", "thirdparty-tools")
           Move-Item -Path thirdparty-tools/panda3d-1.10.14/thirdparty -Destination .
 
       - name: Build Panda
