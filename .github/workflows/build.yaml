@@ -1,0 +1,35 @@
+name: "Build Engine"
+on: ["workflow_dispatch"]
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: "Checkout files"
+        uses: actions/checkout@v4
+
+      - name: Download Thirdparty
+        shell: powershell
+        run: |
+          $wc = New-Object System.Net.WebClient
+          $wc.DownloadFile("https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-win64.zip", "thirdparty-tools.zip")
+          Expand-Archive -Path thirdparty-tools.zip
+          Move-Item -Path thirdparty-tools/panda3d-1.10.14/thirdparty -Destination .
+
+      - name: Build Panda
+        shell: powershell
+        run: |
+          .\thirdparty\win-python3.12-x64\python.exe makepanda\makepanda.py --installer --wheel --optimize 3 --everything --msvc-version=14.3 --windows-sdk=10 --threads=4
+
+      - name: "Upload Installer"
+        uses: actions/upload-artifact@v4
+        with:
+          name: "panda3d-windows-installer"
+          path: "Panda3D-1.11.0-py3.12-x64.exe"
+          if-no-files-found: "error"
+
+      - name: "Upload Wheel"
+        uses: actions/upload-artifact@v4
+        with:
+          name: "panda3d-windows-wheel"
+          path: "panda3d-1.11.0-cp312-cp312-win_amd64.whl"
+          if-no-files-found: "error"
