@@ -1,9 +1,10 @@
 from panda3d.direct import DCPacker
-from .MsgTypes import *
+from . import MsgTypes
 from direct.directnotify import DirectNotifyGlobal
 from .ConnectionRepository import ConnectionRepository
 from .PyDatagram import PyDatagram
 from .PyDatagramIterator import PyDatagramIterator
+
 
 class AstronDatabaseInterface:
     """
@@ -22,7 +23,7 @@ class AstronDatabaseInterface:
         self._callbacks = {}
         self._dclasses = {}
 
-    def createObject(self, databaseId, dclass, fields={}, callback=None):
+    def createObject(self, databaseId, dclass, fields=None, callback=None):
         """
         Create an object in the specified database.
 
@@ -31,6 +32,8 @@ class AstronDatabaseInterface:
         fields is a dict with any fields that should be stored in the object on creation.
         callback will be called with callback(doId) if specified. On failure, doId is 0.
         """
+        if fields is None:
+            fields = {}
 
         # Save the callback:
         ctx = self.air.getContext()
@@ -53,7 +56,7 @@ class AstronDatabaseInterface:
 
         # Now generate and send the datagram:
         dg = PyDatagram()
-        dg.addServerHeader(databaseId, self.air.ourChannel, DBSERVER_CREATE_OBJECT)
+        dg.addServerHeader(databaseId, self.air.ourChannel, MsgTypes.DBSERVER_CREATE_OBJECT)
         dg.addUint32(ctx)
         dg.addUint16(dclass.getNumber())
         dg.addUint16(fieldCount)
@@ -92,18 +95,15 @@ class AstronDatabaseInterface:
         dg = PyDatagram()
 
         if not fieldNames:
-            dg.addServerHeader(databaseId, self.air.ourChannel,
-                               DBSERVER_OBJECT_GET_ALL)
+            dg.addServerHeader(databaseId, self.air.ourChannel, MsgTypes.DBSERVER_OBJECT_GET_ALL)
         else:
             # We need a dclass in order to convert the field names into field IDs:
             assert dclass is not None
 
             if len(fieldNames) > 1:
-                dg.addServerHeader(databaseId, self.air.ourChannel,
-                                   DBSERVER_OBJECT_GET_FIELDS)
+                dg.addServerHeader(databaseId, self.air.ourChannel, MsgTypes.DBSERVER_OBJECT_GET_FIELDS)
             else:
-                dg.addServerHeader(databaseId, self.air.ourChannel,
-                                   DBSERVER_OBJECT_GET_FIELD)
+                dg.addServerHeader(databaseId, self.air.ourChannel, MsgTypes.DBSERVER_OBJECT_GET_FIELD)
 
         dg.addUint32(ctx)
         dg.addUint32(doId)
@@ -123,7 +123,7 @@ class AstronDatabaseInterface:
 
         if ctx not in self._callbacks:
             self.notify.warning('Received unexpected %s'
-                                ' (ctx %d)' % (MsgId2Names[msgType], ctx))
+                                ' (ctx %d)' % (MsgTypes.MsgId2Names[msgType], ctx))
             return
 
         try:
@@ -132,7 +132,7 @@ class AstronDatabaseInterface:
                     self._callbacks[ctx](None, None)
                 return
 
-            if msgType == DBSERVER_OBJECT_GET_ALL_RESP:
+            if msgType == MsgTypes.DBSERVER_OBJECT_GET_ALL_RESP:
                 dclassId = di.getUint16()
                 dclass = self.air.dclassesByNumber.get(dclassId)
             else:
@@ -142,7 +142,7 @@ class AstronDatabaseInterface:
                 self.notify.error('Received bad dclass %d in'
                                   ' DBSERVER_OBJECT_GET_ALL_RESP' % (dclassId))
 
-            if msgType == DBSERVER_OBJECT_GET_FIELD_RESP:
+            if msgType == MsgTypes.DBSERVER_OBJECT_GET_FIELD_RESP:
                 fieldCount = 1
             else:
                 fieldCount = di.getUint16()
@@ -224,18 +224,18 @@ class AstronDatabaseInterface:
             self._callbacks[ctx] = callback
             if fieldCount == 1:
                 dg.addServerHeader(databaseId, self.air.ourChannel,
-                                   DBSERVER_OBJECT_SET_FIELD_IF_EQUALS)
+                                   MsgTypes.DBSERVER_OBJECT_SET_FIELD_IF_EQUALS)
             else:
                 dg.addServerHeader(databaseId, self.air.ourChannel,
-                                   DBSERVER_OBJECT_SET_FIELDS_IF_EQUALS)
+                                   MsgTypes.DBSERVER_OBJECT_SET_FIELDS_IF_EQUALS)
             dg.addUint32(ctx)
         else:
             if fieldCount == 1:
                 dg.addServerHeader(databaseId, self.air.ourChannel,
-                                   DBSERVER_OBJECT_SET_FIELD)
+                                   MsgTypes.DBSERVER_OBJECT_SET_FIELD)
             else:
                 dg.addServerHeader(databaseId, self.air.ourChannel,
-                                   DBSERVER_OBJECT_SET_FIELDS)
+                                   MsgTypes.DBSERVER_OBJECT_SET_FIELDS)
         dg.addUint32(doId)
         if fieldCount != 1:
             dg.addUint16(fieldCount)
@@ -295,13 +295,15 @@ class AstronDatabaseInterface:
             del self._callbacks[ctx]
 
     def handleDatagram(self, msgType, di):
-        if msgType == DBSERVER_CREATE_OBJECT_RESP:
+        if msgType == MsgTypes.DBSERVER_CREATE_OBJECT_RESP:
             self.handleCreateObjectResp(di)
-        elif msgType in (DBSERVER_OBJECT_GET_ALL_RESP,
-                         DBSERVER_OBJECT_GET_FIELDS_RESP,
-                         DBSERVER_OBJECT_GET_FIELD_RESP):
+        elif msgType in (
+            MsgTypes.DBSERVER_OBJECT_GET_ALL_RESP,
+            MsgTypes.DBSERVER_OBJECT_GET_FIELDS_RESP,
+            MsgTypes.DBSERVER_OBJECT_GET_FIELD_RESP
+        ):
             self.handleQueryObjectResp(msgType, di)
-        elif msgType == DBSERVER_OBJECT_SET_FIELD_IF_EQUALS_RESP:
+        elif msgType == MsgTypes.DBSERVER_OBJECT_SET_FIELD_IF_EQUALS_RESP:
             self.handleUpdateObjectResp(di, False)
-        elif msgType == DBSERVER_OBJECT_SET_FIELDS_IF_EQUALS_RESP:
+        elif msgType == MsgTypes.DBSERVER_OBJECT_SET_FIELDS_IF_EQUALS_RESP:
             self.handleUpdateObjectResp(di, True)

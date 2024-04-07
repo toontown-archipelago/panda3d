@@ -2,9 +2,10 @@
 
 from direct.directnotify import DirectNotifyGlobal
 from .ClientRepositoryBase import ClientRepositoryBase
-from .MsgTypes import *
+from . import MsgTypes
 from direct.distributed.PyDatagram import PyDatagram
 from panda3d.direct import STUint16, STUint32
+
 
 class AstronClientRepository(ClientRepositoryBase):
     """
@@ -22,7 +23,7 @@ class AstronClientRepository(ClientRepositoryBase):
     * LOST_CONNECTION ()
     """
 
-    notify = DirectNotifyGlobal.directNotify.newCategory("ClientRepository")
+    notify = DirectNotifyGlobal.directNotify.newCategory("AstronClientRepository")
 
     # This is required by DoCollectionManager, even though it's not
     # used by this implementation.
@@ -31,19 +32,20 @@ class AstronClientRepository(ClientRepositoryBase):
     def __init__(self, *args, **kwargs):
         ClientRepositoryBase.__init__(self, *args, **kwargs)
         base.finalExitCallbacks.append(self.shutdown)
-        self.message_handlers = {CLIENT_HELLO_RESP: self.handleHelloResp,
-                                 CLIENT_EJECT: self.handleEject,
-                                 CLIENT_ENTER_OBJECT_REQUIRED: self.handleEnterObjectRequired,
-                                 CLIENT_ENTER_OBJECT_REQUIRED_OWNER: self.handleEnterObjectRequiredOwner,
-                                 CLIENT_OBJECT_SET_FIELD: self.handleUpdateField,
-                                 CLIENT_OBJECT_SET_FIELDS: self.handleUpdateFields,
-                                 CLIENT_OBJECT_LEAVING: self.handleObjectLeaving,
-                                 CLIENT_OBJECT_LOCATION: self.handleObjectLocation,
-                                 CLIENT_ADD_INTEREST: self.handleAddInterest,
-                                 CLIENT_ADD_INTEREST_MULTIPLE: self.handleAddInterestMultiple,
-                                 CLIENT_REMOVE_INTEREST: self.handleRemoveInterest,
-                                 CLIENT_DONE_INTEREST_RESP: self.handleInterestDoneMessage,
-                                 }
+        self.message_handlers = {
+            MsgTypes.CLIENT_HELLO_RESP: self.handleHelloResp,
+            MsgTypes.CLIENT_EJECT: self.handleEject,
+            MsgTypes.CLIENT_ENTER_OBJECT_REQUIRED: self.handleEnterObjectRequired,
+            MsgTypes.CLIENT_ENTER_OBJECT_REQUIRED_OWNER: self.handleEnterObjectRequiredOwner,
+            MsgTypes.CLIENT_OBJECT_SET_FIELD: self.handleUpdateField,
+            MsgTypes.CLIENT_OBJECT_SET_FIELDS: self.handleUpdateFields,
+            MsgTypes.CLIENT_OBJECT_LEAVING: self.handleObjectLeaving,
+            MsgTypes.CLIENT_OBJECT_LOCATION: self.handleObjectLocation,
+            MsgTypes.CLIENT_ADD_INTEREST: self.handleAddInterest,
+            MsgTypes.CLIENT_ADD_INTEREST_MULTIPLE: self.handleAddInterestMultiple,
+            MsgTypes.CLIENT_REMOVE_INTEREST: self.handleRemoveInterest,
+            MsgTypes.CLIENT_DONE_INTEREST_RESP: self.handleInterestDoneMessage,
+        }
 
     #
     # Message Handling
@@ -51,9 +53,6 @@ class AstronClientRepository(ClientRepositoryBase):
 
     def handleDatagram(self, di):
         msgType = self.getMsgType()
-    #    self.handleMessageType(msgType, di)
-    #
-    #def handleMessageType(self, msgType, di):
         if msgType in self.message_handlers:
             self.message_handlers[msgType](di)
         else:
@@ -61,7 +60,7 @@ class AstronClientRepository(ClientRepositoryBase):
 
         self.considerHeartbeat()
 
-    def handleHelloResp(self, di):
+    def handleHelloResp(self, _):
         messenger.send("CLIENT_HELLO_RESP", [])
 
     def handleEject(self, di):
@@ -127,19 +126,7 @@ class AstronClientRepository(ClientRepositoryBase):
         return distObj
 
     def handleUpdateFields(self, di):
-        # Can't test this without the server actually sending it.
         self.notify.error("CLIENT_OBJECT_SET_FIELDS not implemented!")
-        # # Here's some tentative code and notes:
-        # do_id = di.getUint32()
-        # field_count = di.getUint16()
-        # for i in range(0, field_count):
-        #     field_id = di.getUint16()
-        #     field = self.get_dc_file().get_field_by_index(field_id)
-        #     # print(type(field))
-        #     # print(field)
-        #     # FIXME: Get field type, unpack value, create and send message.
-        #     # value = di.get?()
-        #     # Assemble new message
 
     def handleObjectLeaving(self, di):
         do_id = di.get_uint32()
@@ -201,8 +188,7 @@ class AstronClientRepository(ClientRepositoryBase):
                 self.freeDoId(doId)
         else:
             # Otherwise, ignore it
-            self.notify.warning(
-                "Asked to delete non-existent DistObj " + str(doId))
+            self.notify.warning("Asked to delete non-existent DistObj " + str(doId))
 
     #
     # Sending messages
@@ -210,26 +196,25 @@ class AstronClientRepository(ClientRepositoryBase):
 
     def sendUpdate(self, distObj, fieldName, args):
         """ Sends a normal update for a single field. """
-        dg = distObj.dclass.clientFormatUpdate(
-            fieldName, distObj.doId, args)
+        dg = distObj.dclass.clientFormatUpdate(fieldName, distObj.doId, args)
         self.send(dg)
 
     # FIXME: The version string should default to a .prc variable.
     def sendHello(self, version_string):
         dg = PyDatagram()
-        dg.add_uint16(CLIENT_HELLO)
+        dg.add_uint16(MsgTypes.CLIENT_HELLO)
         dg.add_uint32(self.get_dc_file().get_hash())
         dg.add_string(version_string)
         self.send(dg)
 
     def sendHeartbeat(self):
         datagram = PyDatagram()
-        datagram.addUint16(CLIENT_HEARTBEAT)
+        datagram.addUint16(MsgTypes.CLIENT_HEARTBEAT)
         self.send(datagram)
 
     def sendAddInterest(self, context, interest_id, parent_id, zone_id):
         dg = PyDatagram()
-        dg.add_uint16(CLIENT_ADD_INTEREST)
+        dg.add_uint16(MsgTypes.CLIENT_ADD_INTEREST)
         dg.add_uint32(context)
         dg.add_uint16(interest_id)
         dg.add_uint32(parent_id)
@@ -238,7 +223,7 @@ class AstronClientRepository(ClientRepositoryBase):
 
     def sendAddInterestMultiple(self, context, interest_id, parent_id, zone_ids):
         dg = PyDatagram()
-        dg.add_uint16(CLIENT_ADD_INTEREST_MULTIPLE)
+        dg.add_uint16(MsgTypes.CLIENT_ADD_INTEREST_MULTIPLE)
         dg.add_uint32(context)
         dg.add_uint16(interest_id)
         dg.add_uint32(parent_id)
@@ -249,7 +234,7 @@ class AstronClientRepository(ClientRepositoryBase):
 
     def sendRemoveInterest(self, context, interest_id):
         dg = PyDatagram()
-        dg.add_uint16(CLIENT_REMOVE_INTEREST)
+        dg.add_uint16(MsgTypes.CLIENT_REMOVE_INTEREST)
         dg.add_uint32(context)
         dg.add_uint16(interest_id)
         self.send(dg)

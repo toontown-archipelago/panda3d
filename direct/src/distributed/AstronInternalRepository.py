@@ -1,6 +1,6 @@
 from panda3d.core import *
 from panda3d.direct import DCPacker
-from .MsgTypes import *
+from . import MsgTypes
 from direct.showbase import ShowBase # __builtin__.config
 from direct.task.TaskManagerGlobal import * # taskMgr
 from direct.directnotify import DirectNotifyGlobal
@@ -10,6 +10,7 @@ from .PyDatagramIterator import PyDatagramIterator
 from .AstronDatabaseInterface import AstronDatabaseInterface
 from .NetMessenger import NetMessenger
 import collections
+
 
 # Helper functions for logging output:
 def msgpack_length(dg, length, fix, maxfix, tag8, tag16, tag32):
@@ -26,6 +27,7 @@ def msgpack_length(dg, length, fix, maxfix, tag8, tag16, tag32):
         dg.addBeUint32(length)
     else:
         raise ValueError('Value too big for MessagePack')
+
 
 def msgpack_encode(dg, element):
     if element == None:
@@ -85,6 +87,7 @@ def msgpack_encode(dg, element):
         dg.addBeFloat64(element)
     else:
         raise TypeError('Encountered non-MsgPack-packable value: %r' % element)
+
 
 class AstronInternalRepository(ConnectionRepository):
     """
@@ -175,7 +178,7 @@ class AstronInternalRepository(ConnectionRepository):
         self._registeredChannels.add(channel)
 
         dg = PyDatagram()
-        dg.addServerControlHeader(CONTROL_ADD_CHANNEL)
+        dg.addServerControlHeader(MsgTypes.CONTROL_ADD_CHANNEL)
         dg.addChannel(channel)
         self.send(dg)
 
@@ -190,7 +193,7 @@ class AstronInternalRepository(ConnectionRepository):
         self._registeredChannels.remove(channel)
 
         dg = PyDatagram()
-        dg.addServerControlHeader(CONTROL_REMOVE_CHANNEL)
+        dg.addServerControlHeader(MsgTypes.CONTROL_REMOVE_CHANNEL)
         dg.addChannel(channel)
         self.send(dg)
 
@@ -205,7 +208,7 @@ class AstronInternalRepository(ConnectionRepository):
         """
 
         dg2 = PyDatagram()
-        dg2.addServerControlHeader(CONTROL_ADD_POST_REMOVE)
+        dg2.addServerControlHeader(MsgTypes.CONTROL_ADD_POST_REMOVE)
         dg2.addUint64(self.ourChannel)
         dg2.addBlob(dg.getMessage())
         self.send(dg2)
@@ -220,35 +223,41 @@ class AstronInternalRepository(ConnectionRepository):
         """
 
         dg = PyDatagram()
-        dg.addServerControlHeader(CONTROL_CLEAR_POST_REMOVES)
+        dg.addServerControlHeader(MsgTypes.CONTROL_CLEAR_POST_REMOVES)
         dg.addUint64(self.ourChannel)
         self.send(dg)
 
     def handleDatagram(self, di):
         msgType = self.getMsgType()
 
-        if msgType in (STATESERVER_OBJECT_ENTER_AI_WITH_REQUIRED,
-                       STATESERVER_OBJECT_ENTER_AI_WITH_REQUIRED_OTHER):
-            self.handleObjEntry(di, msgType == STATESERVER_OBJECT_ENTER_AI_WITH_REQUIRED_OTHER)
-        elif msgType in (STATESERVER_OBJECT_CHANGING_AI,
-                         STATESERVER_OBJECT_DELETE_RAM):
+        if msgType in (
+            MsgTypes.STATESERVER_OBJECT_ENTER_AI_WITH_REQUIRED,
+            MsgTypes.STATESERVER_OBJECT_ENTER_AI_WITH_REQUIRED_OTHER
+        ):
+            self.handleObjEntry(di, msgType == MsgTypes.STATESERVER_OBJECT_ENTER_AI_WITH_REQUIRED_OTHER)
+        elif msgType in (
+            MsgTypes.STATESERVER_OBJECT_CHANGING_AI,
+            MsgTypes.STATESERVER_OBJECT_DELETE_RAM
+        ):
             self.handleObjExit(di)
-        elif msgType == STATESERVER_OBJECT_CHANGING_LOCATION:
+        elif msgType == MsgTypes.STATESERVER_OBJECT_CHANGING_LOCATION:
             self.handleObjLocation(di)
-        elif msgType in (DBSERVER_CREATE_OBJECT_RESP,
-                         DBSERVER_OBJECT_GET_ALL_RESP,
-                         DBSERVER_OBJECT_GET_FIELDS_RESP,
-                         DBSERVER_OBJECT_GET_FIELD_RESP,
-                         DBSERVER_OBJECT_SET_FIELD_IF_EQUALS_RESP,
-                         DBSERVER_OBJECT_SET_FIELDS_IF_EQUALS_RESP):
+        elif msgType in (
+            MsgTypes.DBSERVER_CREATE_OBJECT_RESP,
+            MsgTypes.DBSERVER_OBJECT_GET_ALL_RESP,
+            MsgTypes.DBSERVER_OBJECT_GET_FIELDS_RESP,
+            MsgTypes.DBSERVER_OBJECT_GET_FIELD_RESP,
+            MsgTypes.DBSERVER_OBJECT_SET_FIELD_IF_EQUALS_RESP,
+            MsgTypes.DBSERVER_OBJECT_SET_FIELDS_IF_EQUALS_RESP
+        ):
             self.dbInterface.handleDatagram(msgType, di)
-        elif msgType == DBSS_OBJECT_GET_ACTIVATED_RESP:
+        elif msgType == MsgTypes.DBSS_OBJECT_GET_ACTIVATED_RESP:
             self.handleGetActivatedResp(di)
         elif msgType == STATESERVER_OBJECT_GET_LOCATION_RESP:
             self.handleGetLocationResp(di)
-        elif msgType == STATESERVER_OBJECT_GET_ALL_RESP:
+        elif msgType == MsgTypes.STATESERVER_OBJECT_GET_ALL_RESP:
             self.handleGetObjectResp(di)
-        elif msgType == CLIENTAGENT_GET_NETWORK_ADDRESS_RESP:
+        elif msgType == MsgTypes.CLIENTAGENT_GET_NETWORK_ADDRESS_RESP:
             self.handleGetNetworkAddressResp(di)
         elif msgType >= 20000:
             # These messages belong to the NetMessenger:
@@ -331,7 +340,7 @@ class AstronInternalRepository(ConnectionRepository):
         self.__callbacks[ctx] = callback
 
         dg = PyDatagram()
-        dg.addServerHeader(doId, self.ourChannel, DBSS_OBJECT_GET_ACTIVATED)
+        dg.addServerHeader(doId, self.ourChannel, MsgTypes.DBSS_OBJECT_GET_ACTIVATED)
         dg.addUint32(ctx)
         dg.addUint32(doId)
         self.send(dg)
@@ -349,7 +358,7 @@ class AstronInternalRepository(ConnectionRepository):
         ctx = self.getContext()
         self.__callbacks[ctx] = callback
         dg = PyDatagram()
-        dg.addServerHeader(doId, self.ourChannel, STATESERVER_OBJECT_GET_LOCATION)
+        dg.addServerHeader(doId, self.ourChannel, MsgTypes.STATESERVER_OBJECT_GET_LOCATION)
         dg.addUint32(ctx)
         self.send(dg)
 
@@ -381,7 +390,7 @@ class AstronInternalRepository(ConnectionRepository):
         ctx = self.getContext()
         self.__callbacks[ctx] = callback
         dg = PyDatagram()
-        dg.addServerHeader(doId, self.ourChannel, STATESERVER_OBJECT_GET_ALL)
+        dg.addServerHeader(doId, self.ourChannel, MsgTypes.STATESERVER_OBJECT_GET_ALL)
         dg.addUint32(ctx)
         dg.addUint32(doId)
         self.send(dg)
@@ -441,7 +450,7 @@ class AstronInternalRepository(ConnectionRepository):
         ctx = self.getContext()
         self.__callbacks[ctx] = callback
         dg = PyDatagram()
-        dg.addServerHeader(clientId, self.ourChannel, CLIENTAGENT_GET_NETWORK_ADDRESS)
+        dg.addServerHeader(clientId, self.ourChannel, MsgTypes.CLIENTAGENT_GET_NETWORK_ADDRESS)
         dg.addUint32(ctx)
         self.send(dg)
 
@@ -512,14 +521,14 @@ class AstronInternalRepository(ConnectionRepository):
                 fieldCount += 1
 
             dg = PyDatagram()
-            dg.addServerHeader(doId, self.ourChannel, DBSS_OBJECT_ACTIVATE_WITH_DEFAULTS)
+            dg.addServerHeader(doId, self.ourChannel, MsgTypes.DBSS_OBJECT_ACTIVATE_WITH_DEFAULTS)
             dg.addUint32(doId)
             dg.addUint32(0)
             dg.addUint32(0)
             self.send(dg)
             # DEFAULTS_OTHER isn't implemented yet, so we chase it with a SET_FIELDS
             dg = PyDatagram()
-            dg.addServerHeader(doId, self.ourChannel, STATESERVER_OBJECT_SET_FIELDS)
+            dg.addServerHeader(doId, self.ourChannel, MsgTypes.STATESERVER_OBJECT_SET_FIELDS)
             dg.addUint32(doId)
             dg.addUint16(fieldCount)
             dg.appendData(fieldPacker.getBytes())
@@ -527,13 +536,13 @@ class AstronInternalRepository(ConnectionRepository):
             # Now slide it into the zone we expect to see it in (so it
             # generates onto us with all of the fields in place)
             dg = PyDatagram()
-            dg.addServerHeader(doId, self.ourChannel, STATESERVER_OBJECT_SET_LOCATION)
+            dg.addServerHeader(doId, self.ourChannel, MsgTypes.STATESERVER_OBJECT_SET_LOCATION)
             dg.addUint32(parentId)
             dg.addUint32(zoneId)
             self.send(dg)
         else:
             dg = PyDatagram()
-            dg.addServerHeader(doId, self.ourChannel, DBSS_OBJECT_ACTIVATE_WITH_DEFAULTS)
+            dg.addServerHeader(doId, self.ourChannel, MsgTypes.DBSS_OBJECT_ACTIVATE_WITH_DEFAULTS)
             dg.addUint32(doId)
             dg.addUint32(parentId)
             dg.addUint32(zoneId)
@@ -541,7 +550,7 @@ class AstronInternalRepository(ConnectionRepository):
 
     def sendSetLocation(self, do, parentId, zoneId):
         dg = PyDatagram()
-        dg.addServerHeader(do.doId, self.ourChannel, STATESERVER_OBJECT_SET_LOCATION)
+        dg.addServerHeader(do.doId, self.ourChannel, MsgTypes.STATESERVER_OBJECT_SET_LOCATION)
         dg.addUint32(parentId)
         dg.addUint32(zoneId)
         self.send(dg)
@@ -578,7 +587,7 @@ class AstronInternalRepository(ConnectionRepository):
         """
 
         dg = PyDatagram()
-        dg.addServerHeader(do.doId, self.ourChannel, STATESERVER_OBJECT_DELETE_RAM)
+        dg.addServerHeader(do.doId, self.ourChannel, MsgTypes.STATESERVER_OBJECT_DELETE_RAM)
         dg.addUint32(do.doId)
         self.send(dg)
 
@@ -612,7 +621,7 @@ class AstronInternalRepository(ConnectionRepository):
         # fall over and die.
         if self.serverId:
             dg = PyDatagram()
-            dg.addServerHeader(self.serverId, self.ourChannel, STATESERVER_DELETE_AI_OBJECTS)
+            dg.addServerHeader(self.serverId, self.ourChannel, MsgTypes.STATESERVER_DELETE_AI_OBJECTS)
             dg.addChannel(self.ourChannel)
             self.addPostRemove(dg)
 
@@ -691,7 +700,7 @@ class AstronInternalRepository(ConnectionRepository):
         """
 
         dg = PyDatagram()
-        dg.addServerHeader(doId, aiChannel, STATESERVER_OBJECT_SET_AI)
+        dg.addServerHeader(doId, aiChannel, MsgTypes.STATESERVER_OBJECT_SET_AI)
         dg.add_uint64(aiChannel)
         self.send(dg)
 
@@ -701,7 +710,7 @@ class AstronInternalRepository(ConnectionRepository):
         """
 
         dg = PyDatagram()
-        dg.addServerHeader(clientChannel, self.ourChannel, CLIENTAGENT_EJECT)
+        dg.addServerHeader(clientChannel, self.ourChannel, MsgTypes.CLIENTAGENT_EJECT)
         dg.add_uint16(reasonCode)
         dg.addString(reason)
         self.send(dg)
@@ -713,7 +722,7 @@ class AstronInternalRepository(ConnectionRepository):
         """
 
         dg = PyDatagram()
-        dg.addServerHeader(clientChannel, self.ourChannel, CLIENTAGENT_SET_STATE)
+        dg.addServerHeader(clientChannel, self.ourChannel, MsgTypes.CLIENTAGENT_SET_STATE)
         dg.add_uint16(state)
         self.send(dg)
 
@@ -725,7 +734,7 @@ class AstronInternalRepository(ConnectionRepository):
         """
 
         dg = PyDatagram()
-        dg.addServerHeader(clientChannel, self.ourChannel, CLIENTAGENT_ADD_SESSION_OBJECT)
+        dg.addServerHeader(clientChannel, self.ourChannel, MsgTypes.CLIENTAGENT_ADD_SESSION_OBJECT)
         dg.add_uint32(doId)
         self.send(dg)
 
@@ -737,7 +746,7 @@ class AstronInternalRepository(ConnectionRepository):
         """
 
         dg = PyDatagram()
-        dg.addServerHeader(clientChannel, self.ourChannel, CLIENTAGENT_ADD_INTEREST)
+        dg.addServerHeader(clientChannel, self.ourChannel, MsgTypes.CLIENTAGENT_ADD_INTEREST)
         dg.add_uint16(interestId)
         dg.add_uint32(parentId)
         dg.add_uint32(zoneId)
@@ -750,6 +759,6 @@ class AstronInternalRepository(ConnectionRepository):
         """
 
         dg = PyDatagram()
-        dg.addServerHeader(doId, self.ourChannel, STATESERVER_OBJECT_SET_OWNER)
+        dg.addServerHeader(doId, self.ourChannel, MsgTypes.STATESERVER_OBJECT_SET_OWNER)
         dg.add_uint64(newOwner)
         self.send(dg)
