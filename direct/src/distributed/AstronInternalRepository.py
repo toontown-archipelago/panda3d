@@ -8,7 +8,7 @@ from .ConnectionRepository import ConnectionRepository
 from .PyDatagram import PyDatagram
 from .PyDatagramIterator import PyDatagramIterator
 from .AstronDatabaseInterface import AstronDatabaseInterface
-from .NetMessenger import NetMessenger
+from .AstronNetMessenger import AstronNetMessenger
 import collections
 
 
@@ -126,7 +126,7 @@ class AstronInternalRepository(ConnectionRepository):
 
         self.__contextCounter = 0
 
-        self.netMessenger = NetMessenger(self)
+        self.netMessenger = AstronNetMessenger(self)
 
         self.dbInterface = AstronDatabaseInterface(self)
         self.__callbacks = {}
