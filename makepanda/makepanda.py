@@ -102,6 +102,7 @@ PkgListSet(["PYTHON", "DIRECT",                        # Python support
   "CONTRIB",                                           # Experimental
   "SSE2", "NEON",                                      # Compiler features
   "MIMALLOC",                                          # Memory allocators
+  "TOONTOWN",                                          # ToonTown DNA, Suits etc
 ])
 
 CheckPandaSourceTree()
@@ -2953,6 +2954,8 @@ if not PkgSkip("ODE"):
     panda_modules.append('ode')
 if not PkgSkip("VRPN"):
     panda_modules.append('vrpn')
+if not PkgSkip("TOONTOWN"):
+    panda_modules.append('toontown')
 
 panda_modules_code = """
 "This module is deprecated.  Import from panda3d.core and other panda3d.* modules instead."
@@ -3425,6 +3428,11 @@ CopyAllHeaders('panda/metalibs/pandagles2')
 
 CopyAllHeaders('panda/metalibs/pandaphysics')
 CopyAllHeaders('panda/src/testbed')
+
+if not PkgSkip("TOONTOWN"):
+    CopyAllHeaders('panda/src/toontown/dna')
+    CopyAllHeaders('panda/src/toontown/suit')
+    CopyAllHeaders('panda/src/toontown/toontownbase')
 
 if not PkgSkip("BULLET"):
     CopyAllHeaders('panda/src/bullet')
@@ -5209,6 +5217,53 @@ if not PkgSkip("TINYDISPLAY"):
     TargetAdd('libp3tinydisplay.dll', input='p3tinydisplay_ztriangle_4.obj')
     TargetAdd('libp3tinydisplay.dll', input='p3tinydisplay_ztriangle_table.obj')
     TargetAdd('libp3tinydisplay.dll', input=COMMON_PANDA_LIBS)
+
+#
+# DIRECTORY: panda/src/toontown/*
+#
+if not PkgSkip("TOONTOWN"):
+    # DNA
+    OPTS=['DIR:panda/src/toontown/dna', 'BUILDING:TOONTOWN']
+    TargetAdd('p3dna_composite1.obj', opts=OPTS, input='dnaLoader_composite1.cxx')
+    TargetAdd('p3dna_composite2.obj', opts=OPTS, input='dnaLoader_composite2.cxx')
+
+    OPTS=['DIR:panda/src/toontown/dna', 'BUILDING:TOONTOWN', 'BISONPREFIX_dnayy', 'FLEXDASHI']
+    CreateFile(GetOutputDir()+"/include/dnaParser.h")
+    TargetAdd('p3dna_dnaParser.obj', opts=OPTS, input='dnaParser.yxx')
+    TargetAdd('dnaParser.h', input='p3dna_dnaParser.obj', opts=['DEPENDENCYONLY'])
+    TargetAdd('p3dna_dnaLexer.obj', opts=OPTS, input='dnaLexer.lxx')
+
+    OPTS=['DIR:panda/src/toontown/dna']
+    IGATEFILES=GetDirectoryContents('panda/src/toontown/dna', ["*.h", "*_composite*.cxx"])
+    if "dnaParser.h" in IGATEFILES: IGATEFILES.remove("dnaParser.h")
+    TargetAdd('libp3dna.in', opts=OPTS, input=IGATEFILES)
+    TargetAdd('libp3dna.in', opts=['IMOD:panda3d.toontown', 'ILIB:libp3dna', 'SRCDIR:panda/src/toontown/dna'])
+
+    # SUIT
+    OPTS=['DIR:panda/src/toontown/suit', 'BUILDING:TOONTOWN']
+    TargetAdd('p3suit_composite1.obj', opts=OPTS, input='suit_composite1.cxx')
+
+    OPTS=['DIR:panda/src/toontown/suit']
+    IGATEFILES=GetDirectoryContents('panda/src/toontown/suit', ["*.h", "*_composite*.cxx"])
+    TargetAdd('libp3suit.in', opts=OPTS, input=IGATEFILES)
+    TargetAdd('libp3suit.in', opts=['IMOD:panda3d.toontown', 'ILIB:libp3suit', 'SRCDIR:panda/src/toontown/suit'])
+
+    # DNA + SUIT
+    TargetAdd('libp3toontown.dll', input='p3dna_composite1.obj')
+    TargetAdd('libp3toontown.dll', input='p3dna_composite2.obj')
+    TargetAdd('libp3toontown.dll', input='p3dna_dnaParser.obj')
+    TargetAdd('libp3toontown.dll', input='p3dna_dnaLexer.obj')
+    TargetAdd('libp3toontown.dll', input='p3suit_composite1.obj')
+    TargetAdd('libp3toontown.dll', input=COMMON_PANDA_LIBS)
+    PyTargetAdd('toontown_module.obj', input='libp3dna.in')
+    PyTargetAdd('toontown_module.obj', input='libp3suit.in')
+    PyTargetAdd('toontown_module.obj', opts=['IMOD:panda3d.toontown', 'ILIB:toontown', 'IMPORT:panda3d.core'])
+    PyTargetAdd('toontown.pyd', input='toontown_module.obj')
+    PyTargetAdd('toontown.pyd', input='libp3dna_igate.obj')
+    PyTargetAdd('toontown.pyd', input='libp3suit_igate.obj')
+    PyTargetAdd('toontown.pyd', input='libp3toontown.dll')
+    PyTargetAdd('toontown.pyd', input='libp3interrogatedb.dll')
+    PyTargetAdd('toontown.pyd', input=COMMON_PANDA_LIBS)
 
 #
 # DIRECTORY: direct/src/directbase/
