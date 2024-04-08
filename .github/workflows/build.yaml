@@ -82,19 +82,13 @@ jobs:
             --msvc-version=14.3 `
             --windows-sdk=10
 
-      - name: Rename Panda Binaries
-        shell: powershell
-        run: |
-          Rename-Item Panda3D-1.11.0-py3.11-x64.exe            Panda3D-Windows-x64.exe
-          Rename-Item panda3d-1.11.0-cp311-cp311-win_amd64.whl Panda3D-Windows-x64.whl
-
       - name: Upload Panda Binaries
         shell: powershell
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} Panda3D-Windows-x64.exe
-          gh release upload ${{ github.ref_name }} Panda3D-Windows-x64.whl
+          gh release upload ${{ github.ref_name }} Panda3D-1.11.0-py3.11-x64.exe
+          gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-win_amd64.whl
 
   build-linux:
     runs-on: ubuntu-latest
@@ -193,14 +187,9 @@ jobs:
             --python-incdir="$pythonLocation/include" \
             --python-libdir="$pythonLocation/lib"
 
-      - name: Rename Panda Binaries
-        run: |
-          mv panda3d1.11_1.11.0_amd64.deb                Panda3D-Linux-x64.deb
-          mv panda3d-1.11.0-cp311-cp311-linux_x86_64.whl Panda3D-Linux-x64.whl
-
       - name: Upload Panda Binaries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} Panda3D-Linux-x64.deb
-          gh release upload ${{ github.ref_name }} Panda3D-Linux-x64.whl
+          gh release upload ${{ github.ref_name }} panda3d1.11_1.11.0_amd64.deb
+          gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-linux_x86_64.whl
