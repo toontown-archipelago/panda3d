@@ -85,16 +85,16 @@ jobs:
       - name: Rename Panda Binaries
         shell: powershell
         run: |
-          Rename-Item Panda3D-1.11.0-py3.11-x64.exe            Panda3d-Windows-x64.exe
-          Rename-Item panda3d-1.11.0-cp311-cp311-win_amd64.whl Panda3d-Windows-x64.whl
+          Rename-Item Panda3D-1.11.0-py3.11-x64.exe            Panda3D-Windows-x64.exe
+          Rename-Item panda3d-1.11.0-cp311-cp311-win_amd64.whl Panda3D-Windows-x64.whl
 
       - name: Upload Panda Binaries
         shell: powershell
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} Panda3d-Windows-x64.exe
-          gh release upload ${{ github.ref_name }} Panda3d-Windows-x64.whl
+          gh release upload ${{ github.ref_name }} Panda3D-Windows-x64.exe
+          gh release upload ${{ github.ref_name }} Panda3D-Windows-x64.whl
 
   build-linux:
     runs-on: ubuntu-latest
