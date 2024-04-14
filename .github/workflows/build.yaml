@@ -130,6 +130,8 @@ jobs:
             --use-squish \
             --use-assimp \
             --use-egg \
+            --use-freetype \
+            --use-harfbuzz \
             --use-openssl \
             --use-directcam \
             --use-skel \
