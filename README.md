@@ -20,34 +20,12 @@ resources. If you get stuck, ask for help from our active
 Panda3D is licensed under the Modified BSD License.  See the LICENSE file for
 more details.
 
-Installing Panda3D
-==================
-
-The latest Panda3D SDK can be downloaded from
-[this page](https://www.panda3d.org/download/sdk-1-10-14/).
-If you are familiar with installing Python packages, you can use
-the following command:
-
-```bash
-pip install panda3d
-```
-
-The easiest way to install the latest development build of Panda3D
-into an existing Python installation is using the following command:
-
-```bash
-pip install --pre --extra-index-url https://archive.panda3d.org/ panda3d
-```
-
-If this command fails, please make sure your version of pip is up-to-date.
-
-If you prefer to install the full SDK with all tools, the latest development
-builds can be obtained from [this page](https://www.panda3d.org/download.php?version=devel&sdk).
-
-These are automatically kept up-to-date with the latest GitHub version of Panda.
-
 Building Panda3D
 ================
+
+### Note:
+
+Please ensure that you build Panda3D with Python 3.11.9.
 
 Windows
 -------
@@ -152,85 +130,9 @@ If the build was successful, makepanda will have generated a .dmg file in
 the source directory containing the installer.  Simply open it and run the
 package file in order to install the SDK onto your system.
 
-FreeBSD
--------
 
-Building on FreeBSD is very similar to building on Linux.  You will need to
-install the requisite packages using the system package manager.  To install
-the recommended set of dependencies, you can use this command:
 
-```bash
-pkg install pkgconf bison png jpeg-turbo tiff freetype2 harfbuzz eigen squish openal opusfile libvorbis libX11 mesa-libs ode bullet assimp openexr
-```
 
-You will also need to choose which version of Python you want to use.
-Install the appropriate package for it (such as `python37` or `python38`) and
-run the makepanda script with your chosen Python version:
-
-```bash
-python3.7 makepanda/makepanda.py --everything --installer --no-egl --no-gles --no-gles2
-```
-
-If successful, this will produce a .pkg file in the root of the source
-directory which you can install using `pkg install`.
-
-Android
--------
-
-Although it's possible to build Panda3D on an Android device using the
-[termux](https://termux.com/) shell, the recommended route is to cross-compile
-.whl files using the SDK and NDK, which can then be used by the `build_apps`
-command to build a Python application into an .apk or .aab bundle.  You will
-need to get the latest thirdparty packages, which can be obtained from the
-artifacts page of the last successful run here:
-
-https://github.com/rdb/panda3d-thirdparty/actions?query=branch%3Amain+is%3Asuccess+event%3Apush
-
-This does not include Python at the moment, which can be extracted from
-[this archive](https://rdb.name/thirdparty-android.tar.gz) instead.
-
-These commands show how to compile wheels for the supported Android ABIs:
-
-```bash
-export ANDROID_SDK_ROOT=/home/rdb/local/android
-python3.8 makepanda/makepanda.py --everything --outputdir built-droid-arm64 --arch arm64 --target android-21 --threads 6 --wheel
-python3.8 makepanda/makepanda.py --everything --outputdir built-droid-armv7a --arch armv7a --target android-19 --threads 6 --wheel
-python3.8 makepanda/makepanda.py --everything --outputdir built-droid-x86_64 --arch x86_64 --target android-21 --threads 6 --wheel
-python3.8 makepanda/makepanda.py --everything --outputdir built-droid-x86 --arch x86 --target android-19 --threads 6 --wheel
-```
-
-It is now possible to use the generated wheels with `build_apps`, as explained
-on this page:
-
-https://discourse.panda3d.org/t/deployment-for-android/28226
-
-Running Tests
-=============
-
-Install [PyTest](https://docs.pytest.org/en/latest/getting-started.html#installation)
-and run the `pytest` command.  If you have not installed Panda3D, you will
-need to configure your environment by pointing the `PYTHONPATH` variable at
-the `built` directory.  On Linux, you will also need to point the
-`LD_LIBRARY_PATH` variable at the `built/lib` directory.
-
-As a convenience, you can alternatively pass the `--tests` option to makepanda.
-
-Reporting Issues
-================
-
-If you encounter any bugs when using Panda3D, please report them in the bug
-tracker.  This is hosted at:
-
-  https://github.com/panda3d/panda3d/issues
-
-Make sure to first use the search function to see if the bug has already been
-reported.  When filling out a bug report, make sure that you include as much
-information as possible to help the developers track down the issue, such as
-your version of Panda3D, operating system, architecture, and any code and
-models that are necessary for the developers to reproduce the issue.
-
-If you're not sure whether you've encountered a bug, feel free to ask about
-it in the forums or the IRC channel first.
 
 Supporting the Project
 ======================
