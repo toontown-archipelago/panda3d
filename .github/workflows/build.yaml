@@ -100,6 +100,7 @@ jobs:
             libassimp-dev \
             libeigen3-dev \
             libgl1-mesa-dev \
+            libharfbuzz-dev \
             libjpeg-dev \
             libode-dev \
             libpng-dev \
