@@ -148,3 +148,65 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-linux_x86_64.whl
+  build-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write  # Needed for release upload
+    steps:
+      - name: Checkout files
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          brew install assimp eigen harfbuzz jpeg libpng ode openssl pkg-config libsquish wget
+          # download thirdparty packages from https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-mac.tar.gz
+          # then copy the extracted thirdparty folder to root dir
+          wget https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-mac.tar.gz
+          tar -xvf panda3d-1.10.14-tools-mac.tar.gz 
+          mv panda3d-1.10.14/thirdparty .
+
+      - name: Build Panda
+        run: |
+          python makepanda/makepanda.py \
+            --wheel \
+            --optimize 3 \
+            --lzma \
+            --threads=4 \
+            --nothing \
+            --use-python \
+            --use-direct \
+            --use-gl \
+            --use-tinydisplay \
+            --use-egl \
+            --use-eigen \
+            --use-ode \
+            --use-pandaphysics \
+            --use-zlib \
+            --use-png \
+            --use-jpeg \
+            --use-squish \
+            --use-assimp \
+            --use-egg \
+            --use-freetype \
+            --use-harfbuzz \
+            --use-openssl \
+            --use-directcam \
+            --use-skel \
+            --use-pandaparticlesystem \
+            --use-contrib \
+            --use-sse2 \
+            --use-toontown \
+            --python-incdir="$pythonLocation/include" \
+            --python-libdir="$pythonLocation/lib"
+            
+
+      - name: Upload Panda Binary
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-macosx_11_0_arm64.whl
