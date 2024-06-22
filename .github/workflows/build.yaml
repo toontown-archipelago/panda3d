@@ -174,32 +174,8 @@ jobs:
         run: |
           python makepanda/makepanda.py \
             --wheel \
-            --optimize 3 \
-            --lzma \
             --threads=4 \
-            --nothing \
-            --use-python \
-            --use-direct \
-            --use-gl \
-            --use-tinydisplay \
-            --use-egl \
-            --use-eigen \
-            --use-ode \
-            --use-pandaphysics \
-            --use-zlib \
-            --use-png \
-            --use-jpeg \
-            --use-squish \
-            --use-assimp \
-            --use-egg \
-            --use-freetype \
-            --use-harfbuzz \
-            --use-openssl \
-            --use-directcam \
-            --use-skel \
-            --use-pandaparticlesystem \
-            --use-contrib \
-            --use-sse2 \
+            --everything \
             --use-toontown \
             --python-incdir="$pythonLocation/include" \
             --python-libdir="$pythonLocation/lib"
