@@ -821,11 +821,14 @@ if (COMPILER=="GCC"):
         PkgDisable("COCOA")
 
     if GetTarget() == 'darwin':
+        # this is no longer maintained and honestly hard to get on modern systems, 
+        # plus tt doesn't need it and we dont plan to add shaders
+        # lets disable it
+        PkgDisable("NVIDIACG")
         if OSX_ARCHS and 'x86_64' not in OSX_ARCHS and 'i386' not in OSX_ARCHS:
             # These support only these archs, so don't build them if we're not
             # targeting any of the supported archs.
             PkgDisable("FMODEX")
-            PkgDisable("NVIDIACG")
         elif OSX_ARCHS and 'arm64' in OSX_ARCHS:
             # We must be using the 11.0 SDK or higher, so can't build FMOD Ex
             if not PkgSkip("FMODEX"):

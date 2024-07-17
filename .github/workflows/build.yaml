@@ -180,9 +180,25 @@ jobs:
             --python-incdir="$pythonLocation/include" \
             --python-libdir="$pythonLocation/lib"
             
+          arch -x86_64 python makepanda/makepanda.py \
+            --wheel \
+            --threads=4 \
+            --everything \
+            --use-toontown \
+
+          # universal
+          python makepanda/makepanda.py \
+            --wheel \
+            --threads=4 \
+            --everything \
+            --use-toontown \
+            --universal
+
 
       - name: Upload Panda Binary
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-macosx_11_0_arm64.whl
+          gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-macosx_10_9_x86_64.whl
+          gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-macosx_10_9_universal2.whl
