@@ -29,45 +29,7 @@ jobs:
             --optimize 3 `
             --lzma `
             --threads=4 `
-            --nothing `
-            --use-python `
-            --use-direct `
-            --use-gl `
-            --use-gles `
-            --use-gles2 `
-            --use-tinydisplay `
-            --use-nvidiacg `
-            --use-egl `
-            --use-eigen `
-            --use-openal `
-            --use-vorbis `
-            --use-opus `
-            --use-ffmpeg `
-            --use-swscale `
-            --use-swresample `
-            --use-ode `
-            --use-pandaphysics `
-            --use-zlib `
-            --use-png `
-            --use-jpeg `
-            --use-squish `
-            --use-assimp `
-            --use-egg `
-            --use-freetype `
-            --use-harfbuzz `
-            --use-openssl `
-            --use-directcam `
-            --use-vision `
-            --use-pandatool `
-            --use-pview `
-            --use-deploytools `
-            --use-skel `
-            --use-pandafx `
-            --use-pandaparticlesystem `
-            --use-contrib `
-            --use-sse2 `
-            --use-neon `
-            --use-toontown `
+            --archipelago `
             --msvc-version=14.3 `
             --windows-sdk=10
 
@@ -116,30 +78,7 @@ jobs:
             --optimize 3 \
             --lzma \
             --threads=4 \
-            --nothing \
-            --use-python \
-            --use-direct \
-            --use-gl \
-            --use-tinydisplay \
-            --use-egl \
-            --use-eigen \
-            --use-ode \
-            --use-pandaphysics \
-            --use-zlib \
-            --use-png \
-            --use-jpeg \
-            --use-squish \
-            --use-assimp \
-            --use-egg \
-            --use-freetype \
-            --use-harfbuzz \
-            --use-openssl \
-            --use-directcam \
-            --use-skel \
-            --use-pandaparticlesystem \
-            --use-contrib \
-            --use-sse2 \
-            --use-toontown \
+            --archipelago \
             --python-incdir="$pythonLocation/include" \
             --python-libdir="$pythonLocation/lib"
 
@@ -175,23 +114,20 @@ jobs:
           python makepanda/makepanda.py \
             --wheel \
             --threads=4 \
-            --everything \
-            --use-toontown \
+            --archipelago \
             --python-incdir="$pythonLocation/include" \
             --python-libdir="$pythonLocation/lib"
             
           arch -x86_64 python makepanda/makepanda.py \
             --wheel \
             --threads=4 \
-            --everything \
-            --use-toontown \
+            --archipelago \
 
           # universal
           python makepanda/makepanda.py \
             --wheel \
             --threads=4 \
-            --everything \
-            --use-toontown \
+            --archipelago \
             --universal
 
 
