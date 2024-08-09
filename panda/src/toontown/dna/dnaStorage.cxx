@@ -386,7 +386,14 @@ int DNAStorage::remove_suit_point(PT(DNASuitPoint) point) {
 void DNAStorage::store_suit_block(const int block_number, const std::string& dept) {
   _suit_blocks_map[block_number] = dept;
 }
-
+////////////////////////////////////////////////////////////////////
+//     Function: store_suit_block_num_floors
+//       Access: Public
+//  Description: Store a block number in the SuitBlockFloorsMap
+////////////////////////////////////////////////////////////////////
+void DNAStorage::store_suit_block_num_floors(const int block_number, const int num_floors) {
+  _suit_block_num_floors_map[block_number] = num_floors;
+}
 ////////////////////////////////////////////////////////////////////
 //     Function: get_suit_blocks
 //       Access: Public
@@ -420,8 +427,22 @@ std::string DNAStorage::get_suit_block_track(int block_number) const {
   }
   return (*i).second;
 }
-
-
+////////////////////////////////////////////////////////////////////
+// Function: get_num_floors
+// Access: Public
+// Description: Get the number of floors in the suit building
+////////////////////////////////////////////////////////////////////
+int DNAStorage::get_num_floors(int block_number) const {
+  // Try to find this code in the map
+  SuitBlockFloorsMap::const_iterator i = _suit_block_num_floors_map.find(block_number);
+  if (i == _suit_block_num_floors_map.end()) {
+    dna_cat.error()
+      << "block number: " << block_number << " not found in SuitBlockFloors map" << std::endl;
+    return 0;
+  }
+  return (*i).second;
+  
+}
 ////////////////////////////////////////////////////////////////////
 //     Function: store_block_number
 //       Access: Public

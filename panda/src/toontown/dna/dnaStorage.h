@@ -48,6 +48,7 @@ typedef pmap< int, int > BlockToZoneMap;
 typedef pmap< int, PosHpr > BlockToPosHprMap;
 typedef pmap< int, LMatrix4f > BlockToTransformMap;
 typedef pmap< int, std::string > SuitBlockMap;
+typedef pmap<int, int > SuitBlockFloorsMap;
 typedef pmap< int, std::string > BlockToTitleMap;
 typedef pmap< int, std::string > BlockToArticleMap;
 typedef pmap< int, std::string > BlockToBuildingTypeMap;
@@ -97,7 +98,8 @@ PUBLISHED:
   int get_highest_suit_point_index();
   int remove_suit_point(PT(DNASuitPoint));
   void store_suit_block(const int block_number, const std::string& dept);
-  void store_block_number(const std::string& block, const std::string& zone_id);
+  void store_suit_block_num_floors(const int block_number, const int num_floors);
+  void store_block_number(const std::string &block, const std::string &zone_id);
   void store_block_door_pos_hpr(const std::string& block, const LPoint3f& pos, const LPoint3f& hpr);
   void store_block_sign_transform(const std::string& block, const LMatrix4f& mat);
   void store_block_title(const std::string& block, const std::string& title);
@@ -151,6 +153,8 @@ PUBLISHED:
   SuitBlockMap get_suit_blocks() const;
   bool is_suit_block(int block_number) const;
   std::string get_suit_block_track(int block_number) const;
+
+  int get_num_floors(int block_number) const;
 
   // Block number functions
   int get_zone_from_block_number(int block_number) const;
@@ -263,6 +267,8 @@ private:
   BlockToPosHprMap _block_door_pos_hpr_map;
   BlockToTransformMap _block_sign_transform_map;
   SuitBlockMap _suit_blocks_map;
+  // _suit_block_num_floors_map is a map of block numbers to the number of floors in that block
+  SuitBlockFloorsMap _suit_block_num_floors_map;
   BlockToTitleMap _block_title_map;
   BlockToArticleMap _block_article_map;
   BlockToBuildingTypeMap _block_building_type_map;
