@@ -379,6 +379,50 @@ int DNAStorage::remove_suit_point(PT(DNASuitPoint) point) {
 
 
 ////////////////////////////////////////////////////////////////////
+//     Function: store_suit_block
+//       Access: Public
+//  Description: Store a block number in the SuitBlocks map
+////////////////////////////////////////////////////////////////////
+void DNAStorage::store_suit_block(const int block_number, const std::string& dept) {
+  _suit_blocks_map[block_number] = dept;
+}
+
+////////////////////////////////////////////////////////////////////
+//     Function: get_suit_blocks
+//       Access: Public
+//  Description: Return the SuitBlocks map
+////////////////////////////////////////////////////////////////////
+SuitBlockMap DNAStorage::get_suit_blocks() const {
+  return _suit_blocks_map;
+}
+
+////////////////////////////////////////////////////////////////////
+//     Function: is_suit_block
+//       Access: Public
+//  Description: Check if block number is in the SuitBlocks map
+////////////////////////////////////////////////////////////////////
+bool DNAStorage::is_suit_block(int block_number) const {
+  return _suit_blocks_map.find(block_number) != _suit_blocks_map.end();
+}
+
+////////////////////////////////////////////////////////////////////
+//     Function: get_suit_block_track
+//       Access: Public
+//  Description: Get the department that's stored in the block number
+////////////////////////////////////////////////////////////////////
+std::string DNAStorage::get_suit_block_track(int block_number) const {
+  // Try to find this code in the map
+  SuitBlockMap::const_iterator i = _suit_blocks_map.find(block_number);
+  if (i == _suit_blocks_map.end()) {
+    dna_cat.error()
+      << "block number: " << block_number << " not found in SuitBlocks map" << std::endl;
+    return "";
+  }
+  return (*i).second;
+}
+
+
+////////////////////////////////////////////////////////////////////
 //     Function: store_block_number
 //       Access: Public
 //  Description: Store a block and zone
@@ -486,7 +530,6 @@ const PosHpr& DNAStorage::get_door_pos_hpr_from_block_number(int block_number) c
 int DNAStorage::get_num_block_door_pos_hprs() const {
   return _block_door_pos_hpr_map.size();
 }
-
 
 ////////////////////////////////////////////////////////////////////
 //     Function: get_door_pos_hpr_block_at

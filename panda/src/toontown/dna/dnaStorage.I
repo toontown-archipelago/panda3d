@@ -98,6 +98,7 @@ INLINE void DNAStorage::reset_hood() {
   reset_place_nodes();
   reset_suit_points();
   reset_battle_cells();
+  reset_suit_blocks();
 }
 
 
@@ -142,6 +143,16 @@ INLINE void DNAStorage::reset_suit_points() {
 ////////////////////////////////////////////////////////////////////
 INLINE void DNAStorage::reset_battle_cells() {
   _battle_cell_vector.clear();
+}
+
+
+////////////////////////////////////////////////////////////////////
+//     Function: reset_suit_blocks
+//       Access: Public
+//  Description: clear out the dict
+////////////////////////////////////////////////////////////////////
+INLINE void DNAStorage::reset_suit_blocks() {
+  _suit_blocks_map.clear();
 }
 
 
