@@ -105,6 +105,31 @@ PkgListSet(["PYTHON", "DIRECT",                        # Python support
   "TOONTOWN",                                          # ToonTown DNA, Suits etc
 ])
 
+PkgListSetArchipelago([
+    "PYTHON", "DIRECT",                                  # Python support
+    "GL", "GLES", "GLES2", "TINYDISPLAY",                # 3D graphics
+    "EGL",                                               # OpenGL (ES) integration
+    "EIGEN",                                             # Linear algebra acceleration
+    "OPENAL", "FMODEX",                                  # Audio playback
+    "VORBIS", "OPUS", "FFMPEG", "SWSCALE", "SWRESAMPLE", # Audio decoding
+    "ODE", "PANDAPHYSICS",                               # Physics
+    "ZLIB", "PNG", "JPEG", "SQUISH",                     # 2D Formats support
+    "ASSIMP", "EGG",                                     # 3D Formats support
+    "FREETYPE", "HARFBUZZ",                              # Text rendering
+    "OPENSSL",                                           # Transport
+    "DIRECTCAM", "VISION",                               # Augmented Reality
+    "COCOA",                                             # macOS toolkits
+    "X11",                                               # Unix platform support
+    "PANDATOOL", "PVIEW", "DEPLOYTOOLS",                 # Toolchain
+    "SKEL",                                              # Example SKEL project
+    "PANDAFX",                                           # Some distortion special lenses
+    "PANDAPARTICLESYSTEM",                               # Built in particle system
+    "CONTRIB",                                           # Experimental
+    "SSE2", "NEON",                                      # Compiler features
+    "MIMALLOC",                                          # Memory allocators
+    "TOONTOWN",                                          # ToonTown DNA, Suits etc
+])
+
 CheckPandaSourceTree()
 
 def keyboardInterruptHandler(x,y):
@@ -154,6 +179,7 @@ def usage(problem):
         print("  --<PKG>-libdir    (custom location for library files of thirdparty package)")
     print("")
     print("  --nothing         (disable every third-party lib)")
+    print("  --archipelago     (enable third-party libraries utilized by Toontown: Archipelago)")
     print("  --everything      (enable every third-party lib)")
     print("  --directx-sdk=X   (specify version of DirectX SDK to use: jun2010, aug2009)")
     print("  --windows-sdk=X   (specify Windows SDK version, eg. 7.1, 8.1, 10 or 11.  Default is 8.1)")
@@ -162,7 +188,7 @@ def usage(problem):
     print("")
     print("The simplest way to compile panda is to just type:")
     print("")
-    print("  makepanda --everything")
+    print("  makepanda --archipelago")
     print("")
     os._exit(1)
 
@@ -182,7 +208,7 @@ def parseopts(args):
     # All recognized options.
     longopts = [
         "help","distributor=","verbose","tests",
-        "optimize=","everything","nothing","installer","wheel","rtdist","nocolor",
+        "optimize=","archipelago","everything","nothing","installer","wheel","rtdist","nocolor",
         "version=","lzma","no-python","threads=","outputdir=","override=",
         "static","debversion=","rpmversion=","rpmrelease=","p3dsuffix=","rtdist-version=",
         "directx-sdk=", "windows-sdk=", "msvc-version=", "clean", "use-icl",
@@ -213,6 +239,7 @@ def parseopts(args):
             elif (option=="--verbose"): SetVerbose(True)
             elif (option=="--distributor"): DISTRIBUTOR=value
             elif (option=="--genman"): GENMAN=1
+            elif (option=="--archipelago"): EnableArchipelagoPkgs()
             elif (option=="--everything"): PkgEnableAll()
             elif (option=="--nothing"): PkgDisableAll()
             elif (option=="--threads"): THREADCOUNT=int(value)
@@ -267,8 +294,11 @@ def parseopts(args):
                         PkgSetCustomLocation(pkg)
                         LibDirectory(pkg, value)
                         break
-            if (option == "--everything" or option.startswith("--use-")
-                or option == "--nothing" or option.startswith("--no-")):
+            if (option == "--everything"
+                or option == "--archipelago"
+                or option.startswith("--use-")
+                or option == "--nothing"
+                or option.startswith("--no-")):
                 anything = 1
     except:
         usage(sys.exc_info()[1])

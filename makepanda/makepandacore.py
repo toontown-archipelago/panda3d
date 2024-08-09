@@ -1483,6 +1483,7 @@ def UnsetLinkAllStatic():
 ########################################################################
 
 PKG_LIST_ALL = []
+PKG_LIST_ARCHIPELAGO = []
 PKG_LIST_OMIT = {}
 PKG_LIST_CUSTOM = set()
 
@@ -1492,6 +1493,10 @@ def PkgListSet(pkgs):
     PKG_LIST_ALL=pkgs
     PKG_LIST_OMIT={}
     PkgEnableAll()
+
+def PkgListSetArchipelago(pkgs):
+    global PKG_LIST_ARCHIPELAGO
+    PKG_LIST_ARCHIPELAGO = pkgs
 
 def PkgListGet():
     return PKG_LIST_ALL
@@ -1506,6 +1511,11 @@ def PkgDisableAll():
 
 def PkgEnable(pkg):
     PKG_LIST_OMIT[pkg] = 0
+
+def EnableArchipelagoPkgs():
+    PkgDisableAll()
+    for package in PKG_LIST_ARCHIPELAGO:
+        PKG_LIST_OMIT[package] = 0
 
 def PkgDisable(pkg):
     PKG_LIST_OMIT[pkg] = 1
