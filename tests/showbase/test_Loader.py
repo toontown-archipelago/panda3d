@@ -90,7 +90,7 @@ class FnargleLoader:
 """)
     (tmp_path / "fnargle.dist-info").mkdir()
     (tmp_path / "fnargle.dist-info" / "METADATA").write_text("""
-Metadata-Version: 2.0
+Metadata-Version: 2.1
 Name: fnargle
 Version: 1.0.0
 """)
@@ -120,9 +120,10 @@ fnrgl = fnargle:FnargleLoader
         sys.path = [str(tmp_path), platstdlib, stdlib]
 
         Loader._loadedPythonFileTypes = False
+        loader = Loader()
 
-        # base parameter is only used for audio
-        loader = Loader(None)
+        if not Loader._loadedPythonFileTypes:
+            Loader._loadPythonFileTypes()
         assert Loader._loadedPythonFileTypes
 
         # Should be registered, not yet loaded
