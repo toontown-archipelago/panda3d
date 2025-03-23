@@ -108,6 +108,8 @@ jobs:
           wget https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-mac.tar.gz
           tar -xvf panda3d-1.10.14-tools-mac.tar.gz 
           mv panda3d-1.10.14/thirdparty .
+          # make sure xcode stuff is installed
+          xcode-select --install
 
       - name: Build Panda
         run: |
