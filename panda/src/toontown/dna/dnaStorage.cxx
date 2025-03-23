@@ -167,8 +167,8 @@ PT(DNASuitPoint) DNAStorage::store_suit_point(DNASuitPoint::DNASuitPointType typ
   // Create a new one
   int index = get_highest_suit_point_index() + 1;
   PT(DNASuitPoint) point = new DNASuitPoint(index, type, pos);
-  // Ok, now actually store the point
-  store_suit_point(point);
+  // Ok, now actually  the point
+  _suit_point(point);
   return point;
 }
 
@@ -385,6 +385,15 @@ int DNAStorage::remove_suit_point(PT(DNASuitPoint) point) {
 ////////////////////////////////////////////////////////////////////
 void DNAStorage::store_suit_block(const int block_number, const std::string& dept) {
   _suit_blocks_map[block_number] = dept;
+}
+////////////////////////////////////////////////////////////////////
+//     Function: remove_suit_block
+//       Access: Public
+//  Description: Remove a block number in the SuitBlocks map + num_floors counterpart
+////////////////////////////////////////////////////////////////////
+void DNAStorage::remove_suit_block(const int block_number) {
+  _suit_blocks_map.erase(block_number);
+  _suit_block_num_floors_map.erase(block_number);
 }
 ////////////////////////////////////////////////////////////////////
 //     Function: store_suit_block_num_floors
