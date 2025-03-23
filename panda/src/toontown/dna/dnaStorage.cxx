@@ -387,15 +387,6 @@ void DNAStorage::store_suit_block(const int block_number, const std::string& dep
   _suit_blocks_map[block_number] = dept;
 }
 ////////////////////////////////////////////////////////////////////
-//     Function: remove_suit_block
-//       Access: Public
-//  Description: Remove a block number in the SuitBlocks map + num_floors counterpart
-////////////////////////////////////////////////////////////////////
-void DNAStorage::remove_suit_block(const int block_number) {
-  _suit_blocks_map.erase(block_number);
-  _suit_block_num_floors_map.erase(block_number);
-}
-////////////////////////////////////////////////////////////////////
 //     Function: store_suit_block_num_floors
 //       Access: Public
 //  Description: Store a block number in the SuitBlockFloorsMap
@@ -411,7 +402,6 @@ void DNAStorage::store_suit_block_num_floors(const int block_number, const int n
 SuitBlockMap DNAStorage::get_suit_blocks() const {
   return _suit_blocks_map;
 }
-
 ////////////////////////////////////////////////////////////////////
 //     Function: is_suit_block
 //       Access: Public
@@ -420,7 +410,15 @@ SuitBlockMap DNAStorage::get_suit_blocks() const {
 bool DNAStorage::is_suit_block(int block_number) const {
   return _suit_blocks_map.find(block_number) != _suit_blocks_map.end();
 }
-
+////////////////////////////////////////////////////////////////////
+//     Function: remove_suit_block
+//       Access: Public
+//  Description: Remove a block number in the SuitBlocks map + num_floors counterpart
+////////////////////////////////////////////////////////////////////
+void DNAStorage::remove_suit_block(const int block_number) {
+  _suit_blocks_map.erase(block_number);
+  _suit_block_num_floors_map.erase(block_number);
+}
 ////////////////////////////////////////////////////////////////////
 //     Function: get_suit_block_track
 //       Access: Public
