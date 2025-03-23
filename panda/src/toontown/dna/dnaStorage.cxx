@@ -167,8 +167,8 @@ PT(DNASuitPoint) DNAStorage::store_suit_point(DNASuitPoint::DNASuitPointType typ
   // Create a new one
   int index = get_highest_suit_point_index() + 1;
   PT(DNASuitPoint) point = new DNASuitPoint(index, type, pos);
-  // Ok, now actually  the point
-  _suit_point(point);
+  // Ok, now actually store the point
+  store_suit_point(point);
   return point;
 }
 
