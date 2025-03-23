@@ -98,6 +98,7 @@ PUBLISHED:
   int get_highest_suit_point_index();
   int remove_suit_point(PT(DNASuitPoint));
   void store_suit_block(const int block_number, const std::string& dept);
+  void remove_suit_block(const int block_number);
   void store_suit_block_num_floors(const int block_number, const int num_floors);
   void store_block_number(const std::string &block, const std::string &zone_id);
   void store_block_door_pos_hpr(const std::string& block, const LPoint3f& pos, const LPoint3f& hpr);
