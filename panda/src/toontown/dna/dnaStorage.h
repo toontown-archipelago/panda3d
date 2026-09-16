@@ -29,16 +29,16 @@
 
 struct PosHpr {
 PUBLISHED:
-  PosHpr(const LPoint3f& pos=LPoint3f(0),
-      const LPoint3f& hpr=LPoint3f(0)) :
+  PosHpr(const LPoint3& pos=LPoint3(0),
+      const LPoint3& hpr=LPoint3(0)) :
       _pos(pos),
       _hpr(hpr) {
   }
-  const LPoint3f& get_pos() const { return _pos; }
-  const LPoint3f& get_hpr() const { return _hpr; }
+  const LPoint3& get_pos() const { return _pos; }
+  const LPoint3& get_hpr() const { return _hpr; }
 private:
-  LPoint3f _pos;
-  LPoint3f _hpr;
+  LPoint3 _pos;
+  LPoint3 _hpr;
 };
 typedef pset< std::string > CodeSet;
 typedef pmap< std::string, CodeSet > CodeCatalog;
@@ -46,7 +46,7 @@ typedef pmap< std::string, PT(Texture) > TextureMap;
 typedef pmap< std::string, PT(TextFont) > FontMap;
 typedef pmap< int, int > BlockToZoneMap;
 typedef pmap< int, PosHpr > BlockToPosHprMap;
-typedef pmap< int, LMatrix4f > BlockToTransformMap;
+typedef pmap< int, LMatrix4 > BlockToTransformMap;
 typedef pmap< int, std::string > SuitBlockMap;
 typedef pmap<int, int > SuitBlockFloorsMap;
 typedef pmap< int, std::string > BlockToTitleMap;
@@ -93,7 +93,7 @@ PUBLISHED:
   INLINE void store_node(const std::string &code_string, NodePath node, const std::string &code_category = "");
   INLINE void store_hood_node(const std::string &code_string, NodePath node, const std::string &code_category = "");
   INLINE void store_place_node(const std::string &code_string, NodePath node, const std::string &code_category = "");
-  PT(DNASuitPoint) store_suit_point(DNASuitPoint::DNASuitPointType type, LPoint3f pos);
+  PT(DNASuitPoint) store_suit_point(DNASuitPoint::DNASuitPointType type, LPoint3 pos);
   int store_suit_point(PT(DNASuitPoint));
   int get_highest_suit_point_index();
   int remove_suit_point(PT(DNASuitPoint));
@@ -101,8 +101,8 @@ PUBLISHED:
   void store_suit_block_num_floors(const int block_number, const int num_floors);
   void remove_suit_block(const int block_number);
   void store_block_number(const std::string &block, const std::string &zone_id);
-  void store_block_door_pos_hpr(const std::string& block, const LPoint3f& pos, const LPoint3f& hpr);
-  void store_block_sign_transform(const std::string& block, const LMatrix4f& mat);
+  void store_block_door_pos_hpr(const std::string& block, const LPoint3& pos, const LPoint3& hpr);
+  void store_block_sign_transform(const std::string& block, const LMatrix4& mat);
   void store_block_title(const std::string& block, const std::string& title);
   void store_block_article(const std::string& block, const std::string& article);
   void store_battle_cell(PT(DNABattleCell));
@@ -169,7 +169,7 @@ PUBLISHED:
 
 
   // Block sign pos hpr functions
-  const LMatrix4f& get_sign_transform_from_block_number(int block_number) const;
+  const LMatrix4& get_sign_transform_from_block_number(int block_number) const;
   int get_sign_transform_block_at(unsigned int index) const;
   int get_num_block_sign_transforms() const;
 

@@ -16,7 +16,6 @@
 #include "trueClock.h"
 #include "typedReferenceCount.h"
 #include "mutexImpl.h"
-#include "interrogate_request.h"
 
 #if defined(_MSC_VER) && defined(_DEBUG)
 #include <crtdbg.h>
@@ -827,7 +826,8 @@ ns_record_void_pointer(void *ptr, size_t size) {
   if (_track_memory_usage) {
     if (express_cat.is_spam()) {
       express_cat.spam()
-        << "Recording void pointer " << (void *)ptr << "\n";
+        << "Recording void pointer " << (void *)ptr
+        << " with size " << size << "\n";
     }
 
     // We have to protect modifications to the table from recursive calls by
@@ -847,11 +847,15 @@ ns_record_void_pointer(void *ptr, size_t size) {
 
     MemoryInfo *info = (*insert_result.first).second;
 
-    // We shouldn't already have a void pointer.
+    // If we already have a void pointer, that's okay, as long as the size
+    // matches.
     if (info->_void_ptr != nullptr) {
-      express_cat.error()
-        << "Void pointer " << (void *)ptr << " recorded twice!\n";
-      nassertv(false);
+      if (info->_size != size) {
+        express_cat.error()
+          << "Void pointer " << (void *)ptr
+          << " was already recorded with size " << size << "!\n";
+        nassertv(false);
+      }
     }
 
     if (info->_freeze_index == _freeze_index) {

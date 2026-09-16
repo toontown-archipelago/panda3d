@@ -128,7 +128,7 @@ draw_guide_bar(int x, GuideBarStyle style) {
  */
 void WinStatsTimeline::
 draw_bar(int row, int from_x, int to_x, int collector_index,
-         const std::string &collector_name) {
+         std::string_view collector_name) {
 
   int top = row_to_pixel(row);
   int bottom = row_to_pixel(row + 1);
@@ -463,7 +463,7 @@ graph_window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       return 0;
 
     case 103:
-      WinStatsGraph::_monitor->open_flame_graph(_popup_bar._thread_index, _popup_bar._collector_index);
+      WinStatsGraph::_monitor->open_flame_graph(_popup_bar._thread_index, _popup_bar._collector_index, _popup_bar._frame_number);
       return 0;
 
     case 104:

@@ -21,11 +21,11 @@ INLINE void DNASuitPoint::set_point_type(DNASuitPoint::DNASuitPointType type) {
   _type = type;
 }
 
-INLINE LPoint3f DNASuitPoint::get_pos() const {
+INLINE LPoint3 DNASuitPoint::get_pos() const {
   return _pos;
 }
 
-INLINE void DNASuitPoint::set_pos(LPoint3f pos) {
+INLINE void DNASuitPoint::set_pos(LPoint3 pos) {
   _pos = pos;
 }
 

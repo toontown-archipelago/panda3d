@@ -28,8 +28,8 @@ PUBLISHED:
   INLINE void set_code(std::string code);
   INLINE std::string get_code() const;
 
-  INLINE void set_color(const LColorf &color);
-  INLINE LColorf get_color() const;
+  INLINE void set_color(const LColor &color);
+  INLINE LColor get_color() const;
 
   INLINE void set_letters(std::string letters);
   INLINE std::string get_letters() const;
@@ -39,7 +39,7 @@ private:
 
 protected:
   std::string _code;
-  LColorf _color;
+  LColor _color;
   std::string _letters;
   bool _use_baseline_color;
 

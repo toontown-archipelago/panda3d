@@ -2043,7 +2043,7 @@ yyreduce:
 #line 317 "panda/src/dna/dnaParser.yxx"
 {
   // Make a new battle cell
-  PT(DNABattleCell) cell = new DNABattleCell((yyvsp[-5]._number), (yyvsp[-4]._number), LPoint3f((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number)));
+  PT(DNABattleCell) cell = new DNABattleCell((yyvsp[-5]._number), (yyvsp[-4]._number), LPoint3((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number)));
 
   // Store the battle cell in the dna storage
   dna_top_node->get_dna_storage()->store_battle_cell(cell);
@@ -3550,7 +3550,7 @@ yyreduce:
 #line 1507 "panda/src/dna/dnaParser.yxx"
 {
   // An apparent compiler bug with MSVC prevents this line from compiling properly:
-  //  $$ = LVecBase3f($3, $4, $5);
+  //  $$ = LVecBase3($3, $4, $5);
 
   // Fortunately, this is functionally equivalent:
   (yyval._v3).set((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number));
@@ -3565,7 +3565,7 @@ yyreduce:
   if (temp_hpr_fix) {
     $$.set($3, $4, $5);
   } else {
-    $$ = new_to_old_hpr(LVecBase3f($3, $4, $5));
+    $$ = new_to_old_hpr(LVecBase3($3, $4, $5));
   }*/
   (yyval._v3).set((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number));
 }
@@ -3577,7 +3577,7 @@ yyreduce:
 {
   // Old (broken) HPR representation
   if (temp_hpr_fix) {
-    (yyval._v3) = old_to_new_hpr(LVecBase3f((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number)));
+    (yyval._v3) = old_to_new_hpr(LVecBase3((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number)));
   } else {
     (yyval._v3).set((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number));
   }
@@ -3753,7 +3753,7 @@ yyreduce:
   PT(DNASuitPoint) point = new DNASuitPoint((int)(yyvsp[-5]._number),
                                             (DNASuitPoint::DNASuitPointType)(int
 )(yyvsp[-4]._number),
-                                            LPoint3f((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number)));
+                                            LPoint3((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number)));
   dna_top_node->get_dna_storage()->store_suit_point(point);
 }
 #line 3760 "built/tmp/dnaParser.yxx.c"
@@ -3766,7 +3766,7 @@ yyreduce:
   PT(DNASuitPoint) point = new DNASuitPoint((int)(yyvsp[-6]._number),
                                             (DNASuitPoint::DNASuitPointType)(int
 )(yyvsp[-5]._number),
-                                            LPoint3f((yyvsp[-4]._number), (yyvsp[-3]._number), (yyvsp[-2]._number)),
+                                            LPoint3((yyvsp[-4]._number), (yyvsp[-3]._number), (yyvsp[-2]._number)),
                                             (int)(yyvsp[-1]._number));
   dna_top_node->get_dna_storage()->store_suit_point(point);
 }
@@ -3778,7 +3778,7 @@ yyreduce:
 {
   // Current syntax, without lb_index.
   PT(DNASuitPoint) point = new DNASuitPoint((int)(yyvsp[-7]._number), (yyvsp[-5]._suit_point_type),
-                                            LPoint3f((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number)));
+                                            LPoint3((yyvsp[-3]._number), (yyvsp[-2]._number), (yyvsp[-1]._number)));
   dna_top_node->get_dna_storage()->store_suit_point(point);
 }
 #line 3785 "built/tmp/dnaParser.yxx.c"
@@ -3789,7 +3789,7 @@ yyreduce:
 {
   // Current syntax, with lb_index.
   PT(DNASuitPoint) point = new DNASuitPoint((int)(yyvsp[-9]._number), (yyvsp[-7]._suit_point_type),
-                                            LPoint3f((yyvsp[-5]._number), (yyvsp[-4]._number), (yyvsp[-3]._number)),
+                                            LPoint3((yyvsp[-5]._number), (yyvsp[-4]._number), (yyvsp[-3]._number)),
                                             (int)(yyvsp[-1]._number));
   dna_top_node->get_dna_storage()->store_suit_point(point);
 }

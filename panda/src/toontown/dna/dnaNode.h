@@ -22,19 +22,19 @@ PUBLISHED:
   virtual NodePath traverse(NodePath &parent, DNAStorage *store, int editing=0);
   virtual void write(std::ostream &out, DNAStorage *store, int indent_level = 0) const;
 
-  INLINE void set_pos(const LVecBase3f &pos);
-  INLINE LVecBase3f get_pos() const;
+  INLINE void set_pos(const LVecBase3 &pos);
+  INLINE LVecBase3 get_pos() const;
 
-  INLINE void set_hpr(const LVecBase3f &hpr);
-  INLINE LVecBase3f get_hpr() const;
+  INLINE void set_hpr(const LVecBase3 &hpr);
+  INLINE LVecBase3 get_hpr() const;
 
-  INLINE void set_scale(const LVecBase3f &scale);
-  INLINE LVecBase3f get_scale() const;
+  INLINE void set_scale(const LVecBase3 &scale);
+  INLINE LVecBase3 get_scale() const;
 
 protected:
-  LVecBase3f _pos;
-  LVecBase3f _hpr;
-  LVecBase3f _scale;
+  LVecBase3 _pos;
+  LVecBase3 _hpr;
+  LVecBase3 _scale;
 
 private:
   virtual DNAGroup* make_copy();

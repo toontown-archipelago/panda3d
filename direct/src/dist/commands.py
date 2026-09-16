@@ -75,8 +75,13 @@ def _model_to_bam(_build_cmd, srcpath, dstpath):
 
     src_fn = p3d.Filename.from_os_specific(srcpath)
     dst_fn = p3d.Filename.from_os_specific(dstpath)
+    dst_fn.set_binary()
 
     _register_python_loaders()
+
+    if src_fn.get_extension() == 'egg' and zipfile.is_zipfile(src_fn.to_os_specific()):
+        _build_cmd.warn('Skipping %s as it appears to be a Python .egg archive, was this included by mistake?' % (src_fn.to_os_specific()))
+        return
 
     loader = p3d.Loader.get_global_ptr()
     options = p3d.LoaderOptions(p3d.LoaderOptions.LF_report_errors |
@@ -85,8 +90,30 @@ def _model_to_bam(_build_cmd, srcpath, dstpath):
     if not node:
         raise IOError('Failed to load model: %s' % (srcpath))
 
-    if not p3d.NodePath(node).write_bam_file(dst_fn):
-        raise IOError('Failed to write .bam file: %s' % (dstpath))
+    stream = p3d.OFileStream()
+    if not dst_fn.open_write(stream):
+        raise IOError('Failed to open .bam file for writing: %s' % (dstpath))
+
+    # We pass it the source filename here so that texture files are made
+    # relative to the original pathname and don't point from the destination
+    # back into the source directory.
+    dout = p3d.DatagramOutputFile()
+    if not dout.open(stream, src_fn) or not dout.write_header("pbj\0\n\r"):
+        raise IOError('Failed to write to .bam file: %s' % (dstpath))
+
+    writer = p3d.BamWriter(dout)
+    writer.root_node = node
+    writer.init()
+    if _build_cmd.bam_embed_textures:
+        writer.set_file_texture_mode(p3d.BamEnums.BTM_rawdata)
+    else:
+        writer.set_file_texture_mode(p3d.BamEnums.BTM_relative)
+    writer.write_object(node)
+    writer.flush()
+    writer = None
+    dout.close()
+    dout = None
+    stream.close()
 
 
 macosx_binary_magics = (
@@ -165,14 +192,27 @@ FrozenImporter.get_data = get_data
 """
 
 SITE_PY_ANDROID = """
+# Define this first, before we import anything that might import an extension
+# module.
 import sys, os
-from _frozen_importlib import _imp, FrozenImporter
-from importlib import _bootstrap_external
-from importlib.abc import Loader, MetaPathFinder
-from importlib.machinery import ModuleSpec
-from io import RawIOBase, TextIOWrapper
+from importlib import _bootstrap, _bootstrap_external
+from android_support import log_write as android_log_write
+from android_support import find_library
 
-from android_log import write as android_log_write
+class AndroidExtensionFinder:
+    @classmethod
+    def find_spec(cls, fullname, path=None, target=None):
+        path = find_library('py.' + fullname)
+        if path:
+            loader = _bootstrap_external.ExtensionFileLoader(fullname, path)
+            return _bootstrap.ModuleSpec(fullname, loader, origin=path)
+
+
+sys.meta_path.append(AndroidExtensionFinder)
+
+
+from _frozen_importlib import _imp, FrozenImporter
+from io import RawIOBase, TextIOWrapper
 
 
 sys.frozen = True
@@ -219,8 +259,9 @@ class AndroidLogStream:
     def writable(self):
         return True
 
-sys.stdout = AndroidLogStream(2, 'Python')
-sys.stderr = AndroidLogStream(3, 'Python')
+if sys.version_info < (3, 13):
+    sys.stdout = AndroidLogStream(4, 'python.stdout')
+    sys.stderr = AndroidLogStream(5, 'python.stderr')
 
 
 # Alter FrozenImporter to give a __file__ property to frozen modules.
@@ -239,20 +280,6 @@ def get_data(path):
 
 FrozenImporter.find_spec = find_spec
 FrozenImporter.get_data = get_data
-
-
-class AndroidExtensionFinder(MetaPathFinder):
-    @classmethod
-    def find_spec(cls, fullname, path=None, target=None):
-        soname = 'libpy.' + fullname + '.so'
-        path = os.path.join(os.path.dirname(sys.executable), soname)
-
-        if os.path.exists(path):
-            loader = _bootstrap_external.ExtensionFileLoader(fullname, path)
-            return ModuleSpec(fullname, loader, origin=path)
-
-
-sys.meta_path.append(AndroidExtensionFinder)
 """
 
 
@@ -271,10 +298,12 @@ class build_apps(setuptools.Command):
         self.application_id = None
         self.android_abis = None
         self.android_debuggable = False
+        self.android_app_category = None
         self.android_version_code = 1
         self.android_min_sdk_version = 21
         self.android_max_sdk_version = None
-        self.android_target_sdk_version = 30
+        self.android_target_sdk_version = 35
+        self.android_manifest_file = None
         self.gui_apps = {}
         self.console_apps = {}
         self.macos_main_app = None
@@ -286,9 +315,14 @@ class build_apps(setuptools.Command):
         self.icons = {}
         self.platforms = [
             'manylinux2014_x86_64',
-            'macosx_10_9_x86_64',
+            'macosx_10_13_x86_64',
             'win_amd64',
         ]
+
+        if sys.version_info >= (3, 14):
+            # This version of Python is only available for 10.15+.
+            self.platforms[1] = 'macosx_10_15_x86_64'
+
         self.plugins = []
         self.embed_prc_data = True
         self.extra_prc_files = []
@@ -307,6 +341,7 @@ class build_apps(setuptools.Command):
         ]
         self.file_handlers = {}
         self.bam_model_extensions = ['.egg', '.gltf', '.glb']
+        self.bam_embed_textures = False
         self.exclude_dependencies = [
             # Windows
             'kernel32.dll', 'user32.dll', 'wsock32.dll', 'ws2_32.dll',
@@ -321,7 +356,8 @@ class build_apps(setuptools.Command):
 
             # manylinux1/linux
             'libdl.so.*', 'libstdc++.so.*', 'libm.so.*', 'libgcc_s.so.*',
-            'libpthread.so.*', 'libc.so.*', 'ld-linux-x86-64.so.*',
+            'libpthread.so.*', 'libc.so.*',
+            'ld-linux-x86-64.so.*', 'ld-linux-aarch64.so.*',
             'libgl.so.*', 'libx11.so.*', 'libncursesw.so.*', 'libz.so.*',
             'librt.so.*', 'libutil.so.*', 'libnsl.so.1', 'libXext.so.6',
             'libXrender.so.1', 'libICE.so.6', 'libSM.so.6', 'libEGL.so.1',
@@ -486,6 +522,18 @@ class build_apps(setuptools.Command):
         tmp.update(self.package_data_dirs)
         self.package_data_dirs = tmp
 
+        if 'android' in self.platforms:
+            assert self.application_id, \
+                'Must have a valid application_id when targeting Android!'
+
+            parts = self.application_id.split('.')
+            assert len(parts) >= 2, \
+                'application_id must contain at least one \'.\' separator!'
+
+            for part in parts:
+                assert part.isidentifier(), \
+                    'Each part of application_id must be a valid identifier!'
+
         # Default to all supported ABIs (for the given Android version).
         if self.android_max_sdk_version and self.android_max_sdk_version < 21:
             assert self.android_max_sdk_version >= 19, \
@@ -541,6 +589,10 @@ class build_apps(setuptools.Command):
                 data_dir = os.path.join(build_dir, 'assets')
                 os.makedirs(data_dir, exist_ok=True)
 
+                res_dir = os.path.join(build_dir, 'res')
+                res_raw_dir = os.path.join(res_dir, 'raw')
+                os.makedirs(res_raw_dir, exist_ok=True)
+
                 for abi in self.android_abis:
                     lib_dir = os.path.join(build_dir, 'lib', abi)
                     os.makedirs(lib_dir, exist_ok=True)
@@ -557,7 +609,7 @@ class build_apps(setuptools.Command):
 
                     # We end up copying the data multiple times to the same
                     # directory, but that's probably fine for now.
-                    self.build_binaries(platform + suffix, lib_dir, data_dir)
+                    self.build_binaries(platform + suffix, lib_dir, data_dir, res_raw_dir)
 
                 # Write out the icons to the res directory.
                 for appname, icon in self.icon_objects.items():
@@ -565,9 +617,9 @@ class build_apps(setuptools.Command):
                         # Conventional name for icon on Android.
                         basename = 'ic_launcher.png'
                     else:
-                        basename = f'ic_{appname}.png'
+                        appname_sane = appname.replace(' ', '_')
+                        basename = f'ic_{appname_sane}.png'
 
-                    res_dir = os.path.join(build_dir, 'res')
                     icon.writeSize(48, os.path.join(res_dir, 'mipmap-mdpi-v4', basename))
                     icon.writeSize(72, os.path.join(res_dir, 'mipmap-hdpi-v4', basename))
                     icon.writeSize(96, os.path.join(res_dir, 'mipmap-xhdpi-v4', basename))
@@ -578,8 +630,17 @@ class build_apps(setuptools.Command):
 
                 self.build_assets(platform, data_dir)
 
-                # Generate an AndroidManifest.xml
-                self.generate_android_manifest(os.path.join(build_dir, 'AndroidManifest.xml'))
+                # Generate an AndroidManifest.xml if none was provided
+                manifest_path = os.path.join(build_dir, 'AndroidManifest.xml')
+                if self.android_manifest_file:
+                    try:
+                        self.check_android_manifest(self.android_manifest_file)
+                    except Exception as e:
+                        self.announce(f"Failed to use provided manifest file from {self.android_manifest_file}", distutils.log.FATAL)
+                        raise
+                    self.copy(self.android_manifest_file, manifest_path)
+                else:
+                    self.generate_android_manifest(manifest_path)
             else:
                 self.build_binaries(platform, build_dir, build_dir)
                 self.build_assets(platform, build_dir)
@@ -646,15 +707,21 @@ class build_apps(setuptools.Command):
             subprocess.check_call([sys.executable, '-m', 'pip'] + pip_args)
         except:
             # Display a more helpful message for these common issues.
-            if platform.startswith('manylinux2010_') and sys.version_info >= (3, 11):
+            if platform.startswith('macosx_10_13_') and sys.version_info >= (3, 14):
+                new_platform = platform.replace('macosx_10_13_', 'macosx_10_15_')
+                self.announce('This error likely occurs because {} is not a supported target as of Python 3.14.\nChange the target platform to {} instead.'.format(platform, new_platform), distutils.log.ERROR)
+            elif platform.startswith('macosx_10_9_') or platform.startswith('macosx_10_6_'):
+                if sys.version_info >= (3, 14):
+                    new_platform = 'macosx_10_15_' + platform[12:]
+                else:
+                    new_platform = 'macosx_10_13_' + platform[12:]
+                self.announce('This error likely occurs because {} is no longer supported.\nChange the target platform to {} instead.'.format(platform, new_platform), distutils.log.ERROR)
+            elif platform.startswith('manylinux2010_') and sys.version_info >= (3, 11):
                 new_platform = platform.replace('manylinux2010_', 'manylinux2014_')
                 self.announce('This error likely occurs because {} is not a supported target as of Python 3.11.\nChange the target platform to {} instead.'.format(platform, new_platform), distutils.log.ERROR)
             elif platform.startswith('manylinux1_') and sys.version_info >= (3, 10):
                 new_platform = platform.replace('manylinux1_', 'manylinux2014_')
                 self.announce('This error likely occurs because {} is not a supported target as of Python 3.10.\nChange the target platform to {} instead.'.format(platform, new_platform), distutils.log.ERROR)
-            elif platform.startswith('macosx_10_6_') and sys.version_info >= (3, 8):
-                new_platform = platform.replace('macosx_10_6_', 'macosx_10_9_')
-                self.announce('This error likely occurs because {} is not a supported target as of Python 3.8.\nChange the target platform to {} instead.'.format(platform, new_platform), distutils.log.ERROR)
             raise
 
         # Return a list of paths to the downloaded whls
@@ -746,10 +813,29 @@ class build_apps(setuptools.Command):
         version = self.distribution.get_version()
         classifiers = self.distribution.get_classifiers()
 
-        is_game = False
-        for classifier in classifiers:
-            if classifier == 'Topic :: Games/Entertainment' or classifier.startswith('Topic :: Games/Entertainment ::'):
-                is_game = True
+        # If we have no app category, determine it based on the classifiers.
+        category = self.android_app_category
+        if not category:
+            for classifier in classifiers:
+                classifier = tuple(classifier.split(' :: '))
+                if len(classifier) < 2 or classifier[0] != 'Topic':
+                    continue
+
+                if classifier[:2] == ('Topic', 'Games/Entertainment'):
+                    category = 'game'
+                    break
+                elif classifier[:3] == ('Topic', 'Multimedia', 'Audio'):
+                    category = 'audio'
+                elif classifier[:4] == ('Topic', 'Multimedia', 'Graphics', 'Editors'):
+                    category = 'image'
+                elif classifier[:2] == ('Topic', 'Communications', 'Usenet News'):
+                    category = 'news'
+                elif classifier[:2] == ('Topic', 'Office/Business'):
+                    category = 'productivity'
+                elif classifier[:3] == ('Topic', 'Communications', 'Chat'):
+                    category = 'social'
+                elif classifier[:3] == ('Topic', 'Multimedia', 'Video'):
+                    category = 'video'
 
         manifest = ET.Element('manifest')
         manifest.set('xmlns:android', 'http://schemas.android.com/apk/res/android')
@@ -780,29 +866,42 @@ class build_apps(setuptools.Command):
 
         application = ET.SubElement(manifest, 'application')
         application.set('android:label', name)
-        application.set('android:isGame', ('false', 'true')[is_game])
+        if category == 'game':
+            application.set('android:isGame', 'true')
+        if category:
+            application.set('android:appCategory', category)
         application.set('android:debuggable', ('false', 'true')[self.android_debuggable])
-        application.set('android:extractNativeLibs', 'true')
+        application.set('android:extractNativeLibs', 'false')
+        application.set('android:hardwareAccelerated', 'true')
 
         app_icon = self.icon_objects.get('*', self.icon_objects.get(self.macos_main_app))
         if app_icon:
             application.set('android:icon', '@mipmap/ic_launcher')
 
         for appname in self.gui_apps:
+            appname_sane = appname.replace(' ', '_')
+
             activity = ET.SubElement(application, 'activity')
             activity.set('android:name', 'org.panda3d.android.PythonActivity')
             activity.set('android:label', appname)
-            activity.set('android:theme', '@android:style/Theme.NoTitleBar')
-            activity.set('android:configChanges', 'orientation|keyboardHidden')
+            activity.set('android:theme', '@android:style/Theme.NoTitleBar.Fullscreen')
+            activity.set('android:alwaysRetainTaskState', 'true')
+            activity.set('android:configChanges', 'layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation')
             activity.set('android:launchMode', 'singleInstance')
+            activity.set('android:preferMinimalPostProcessing', 'true')
+            activity.set('android:exported', 'true')
 
             act_icon = self.icon_objects.get(appname)
             if act_icon and act_icon is not app_icon:
-                activity.set('android:icon', '@mipmap/ic_' + appname)
+                activity.set('android:icon', '@mipmap/ic_' + appname_sane)
 
             meta_data = ET.SubElement(activity, 'meta-data')
             meta_data.set('android:name', 'android.app.lib_name')
-            meta_data.set('android:value', appname)
+            meta_data.set('android:value', appname_sane)
+
+            meta_data = ET.SubElement(activity, 'meta-data')
+            meta_data.set('android:name', 'org.panda3d.android.BLOB_RESOURCE')
+            meta_data.set('android:resource', '@raw/' + appname_sane + '.so')
 
             intent_filter = ET.SubElement(activity, 'intent-filter')
             ET.SubElement(intent_filter, 'action').set('android:name', 'android.intent.action.MAIN')
@@ -810,10 +909,44 @@ class build_apps(setuptools.Command):
             ET.SubElement(intent_filter, 'category').set('android:name', 'android.intent.category.LEANBACK_LAUNCHER')
 
         tree = ET.ElementTree(manifest)
+        if sys.version_info >= (3, 9):
+            ET.indent(tree)
         with open(path, 'wb') as fh:
             tree.write(fh, encoding='utf-8', xml_declaration=True)
 
-    def build_binaries(self, platform, binary_dir, data_dir=None):
+    def check_android_manifest(self, path):
+        """ Checks that the user-provided manifest file seems OK. """
+
+        # This function doesn't aim to check everything as it's the user's
+        # responsibility, just a basic sanity check, but if we change anything
+        # in our own generation logic then it would be good to check those
+        # things here and warn if anything needs to be updated.
+
+        import xml.etree.ElementTree as ET
+
+        android = '{http://schemas.android.com/apk/res/android}'
+
+        tree = ET.parse(path)
+        root = tree.getroot()
+        if root.tag != 'manifest':
+            raise RuntimeError(f"Expected <manifest> in {path}")
+
+        if root.attrib['package'] != self.application_id:
+            raise RuntimeError(f"<manifest> package attribute does not match given application_id {self.application_id}")
+
+        apps = root.findall('application')
+        if len(apps) != 1:
+            raise RuntimeError("<manifest> must contain exactly one <application>")
+
+        application = apps[0]
+        for activity in application.iter('activity'):
+            if f'{android}name' not in activity.attrib:
+                raise RuntimeError("<activity> element must have android:name attribute")
+
+            if self.android_target_sdk_version >= 31 and f'{android}exported' not in activity.attrib:
+                raise RuntimeError("<activity> element must have android:exported attribute when targeting Android API 31+")
+
+    def build_binaries(self, platform, binary_dir, data_dir=None, blob_dir=None):
         """ Builds the binary data for the given platform. """
 
         use_wheels = True
@@ -1009,13 +1142,26 @@ class build_apps(setuptools.Command):
 
             stub_name = 'deploy-stub'
             target_name = appname
+            appname_sane = appname
             if platform.startswith('win') or 'macosx' in platform:
                 if not use_console:
                     stub_name = 'deploy-stubw'
             elif platform.startswith('android'):
                 if not use_console:
                     stub_name = 'libdeploy-stubw.so'
-                    target_name = 'lib' + target_name + '.so'
+                    appname_sane = appname.replace(' ', '_')
+                    target_name = 'lib' + appname_sane + '.so'
+
+                if use_wheels:
+                    dexfile = os.path.join(binary_dir, '..', '..', 'classes.dex')
+                    self.copy(os.path.join(p3dwhlfn, 'deploy_libs', 'classes.dex'), dexfile)
+
+                    # Can this wheel load the blob as a raw resource?
+                    with open(dexfile, 'rb') as fh:
+                        supports_blob_resource = b'org.panda3d.android.BLOB_RESOURCE' in fh.read()
+
+                    assert supports_blob_resource, \
+                        "Please use a newer Panda3D wheel to build for Android using this version of build_apps"
 
             if platform.startswith('win'):
                 stub_name += '.exe'
@@ -1047,6 +1193,14 @@ class build_apps(setuptools.Command):
             if not self.log_filename or '%' not in self.log_filename:
                 use_strftime = False
 
+            blob_path = None
+            if blob_dir is not None:
+                if platform.startswith('android'):
+                    # Not really a .so file, but it forces bundletool to align it
+                    blob_path = os.path.join(blob_dir, appname_sane + '.so')
+                else:
+                    blob_path = os.path.join(blob_dir, appname_sane)
+
             target_path = os.path.join(binary_dir, target_name)
             freezer.generateRuntimeFromStub(target_path, stub_file, use_console, {
                 'prc_data': prcexport if self.embed_prc_data else None,
@@ -1060,7 +1214,7 @@ class build_apps(setuptools.Command):
                 'prc_executable_args_envvar': None,
                 'main_dir': None,
                 'log_filename': self.expand_path(self.log_filename, platform),
-            }, self.log_append, use_strftime)
+            }, self.log_append, use_strftime, blob_path)
             stub_file.close()
 
             if temp_file:
@@ -1174,11 +1328,6 @@ class build_apps(setuptools.Command):
             target_path = os.path.join(binary_dir, basename)
             search_path = get_search_path_for(source_path)
             self.copy_with_dependencies(source_path, target_path, search_path)
-
-        # Copy classes.dex on Android
-        if use_wheels and platform.startswith('android'):
-            self.copy(os.path.join(p3dwhlfn, 'deploy_libs', 'classes.dex'),
-                      os.path.join(binary_dir, '..', '..', 'classes.dex'))
 
         # Extract any other data files from dependency packages.
         if data_dir is None:

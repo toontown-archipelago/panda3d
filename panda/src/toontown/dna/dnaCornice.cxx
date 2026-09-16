@@ -41,7 +41,7 @@ DNACornice::DNACornice(const DNACornice &cornice) :
 //       Access: Public
 //  Description:
 ////////////////////////////////////////////////////////////////////
-void DNACornice::set_color(const LColorf &color) {
+void DNACornice::set_color(const LColor &color) {
   _color = color;
 }
 
@@ -51,7 +51,7 @@ void DNACornice::set_color(const LColorf &color) {
 //       Access: Public
 //  Description:
 ////////////////////////////////////////////////////////////////////
-LColorf DNACornice::get_color() const {
+LColor DNACornice::get_color() const {
   return _color;
 }
 
@@ -97,9 +97,9 @@ NodePath DNACornice::traverse(NodePath &parent, DNAStorage *store, int editing) 
   // scale that the wall above us has
 
   // Place the cornice at the top of the flat building
-  cornice_node_path_d.set_pos_hpr_scale(LVector3f(0.0, 0.0, 1.0),
-          LVector3f(0.0),
-          LVector3f(1.0, (width / height), (width / height)));
+  cornice_node_path_d.set_pos_hpr_scale(LVector3(0.0, 0.0, 1.0),
+          LVector3(0.0),
+          LVector3(1.0, (width / height), (width / height)));
   cornice_node_path_d.set_color(_color);
 
   // The top part of the cornice should not be decalled so
@@ -111,9 +111,9 @@ NodePath DNACornice::traverse(NodePath &parent, DNAStorage *store, int editing) 
   // since this non-decal portion is parented above the node with the height scale
 
   // Place the cornice at the top of the flat building
-  cornice_node_path_nd.set_pos_hpr_scale(LVector3f(0.0, 0.0, z),
-                                         LVector3f(0.0),
-                                         LVector3f(1.0, width, width));
+  cornice_node_path_nd.set_pos_hpr_scale(LVector3(0.0, 0.0, z),
+                                         LVector3(0.0),
+                                         LVector3(1.0, width, width));
 
   cornice_node_path_nd.set_color(_color);
 

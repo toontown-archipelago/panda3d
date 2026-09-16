@@ -278,7 +278,7 @@ set_clear_color(const LColor &color) {
 INLINE void Texture::
 clear_clear_color() {
   CDWriter cdata(_cycler, true);
-  cdata->_has_clear_color = true;
+  cdata->_has_clear_color = false;
 }
 
 /**
@@ -2140,12 +2140,20 @@ rescale_texture() {
 }
 
 /**
+ * Returns the number previously passed to setup_async_transfer().
+ */
+INLINE int Texture::
+get_num_async_transfer_buffers() const {
+  return _num_async_transfer_buffers.load(std::memory_order_relaxed);
+}
+
+/**
  * Works like adjust_size, but also considers the texture class.  Movie
  * textures, for instance, always pad outwards, regardless of textures-
  * power-2.
  */
 INLINE bool Texture::
-adjust_this_size(int &x_size, int &y_size, const std::string &name,
+adjust_this_size(int &x_size, int &y_size, std::string_view name,
                  bool for_padding) const {
   CDReader cdata(_cycler);
   return do_adjust_this_size(cdata, x_size, y_size, name, for_padding);

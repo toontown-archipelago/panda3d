@@ -125,9 +125,9 @@ void DNAStreet::write(std::ostream &out, DNAStorage *store, int indent_level) co
   }
 
   // Only write out color if it is not white. This saves unnecessary work
-  if ((!_street_color.almost_equal(LVecBase4f(1.0, 1.0, 1.0, 1.0))) ||
-      (!_sidewalk_color.almost_equal(LVecBase4f(1.0, 1.0, 1.0, 1.0))) ||
-      (!_curb_color.almost_equal(LVecBase4f(1.0, 1.0, 1.0, 1.0)))) {
+  if ((!_street_color.almost_equal(LVecBase4(1.0, 1.0, 1.0, 1.0))) ||
+      (!_sidewalk_color.almost_equal(LVecBase4(1.0, 1.0, 1.0, 1.0))) ||
+      (!_curb_color.almost_equal(LVecBase4(1.0, 1.0, 1.0, 1.0)))) {
     indent(out, indent_level + 1) << "color [ " <<
       _street_color[0] << " " << _street_color[1] << " " << _street_color[2] << " " << _street_color[3] <<
       " ]\n";

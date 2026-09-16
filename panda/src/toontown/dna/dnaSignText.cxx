@@ -96,7 +96,7 @@ NodePath DNASignText::traverse(NodePath &parent, DNAStorage *store, int editing)
   }
 
   // Use the baseline color, if available:
-  LColorf color = _color;
+  LColor color = _color;
   if (_use_baseline_color) {
     color = baseline->get_color();
   }
@@ -128,16 +128,16 @@ NodePath DNASignText::traverse(NodePath &parent, DNAStorage *store, int editing)
   }
   text_node->set_text(letters); // set the text last.
 
-  LVector3f bl_pos = _pos;
-  LVector3f bl_hpr = _hpr;
-  LVector3f bl_scale = _scale;
+  LVector3 bl_pos = _pos;
+  LVector3 bl_hpr = _hpr;
+  LVector3 bl_scale = _scale;
   if ((baseline->get_flags().find('b') != std::string::npos)
       && (baseline->isFirstLetterOfWord(letters))) {
     bl_scale[0]*=1.5;
     bl_scale[2]*=1.5;
   }
   baseline->baseline_next_pos_hpr_scale(bl_pos, bl_hpr, bl_scale,
-    LVector3f(text_node->get_width(), 0.0, text_node->get_height()));
+    LVector3(text_node->get_width(), 0.0, text_node->get_height()));
 
   NodePath signText_node_path = parent.attach_new_node(text_node->generate());
   // Place the signText at the bottom center of the building,
@@ -180,16 +180,16 @@ void DNASignText::write(std::ostream &out, DNAStorage *store, int indent_level) 
     indent(out, indent_level + 1) << "code [ " <<
       '"' << _code << '"' << " ]\n";
   }
-  if (!_color.almost_equal(LVecBase4f(1.0, 1.0, 1.0, 1.0))) {
+  if (!_color.almost_equal(LVecBase4(1.0, 1.0, 1.0, 1.0))) {
     indent(out, indent_level + 1) << "color [ " <<
       _color[0] << " " << _color[1] << " " <<
       _color[2] << " " << _color[3] << " ]\n";
   }
-  if (!_pos.almost_equal(LVecBase3f::zero())) {
+  if (!_pos.almost_equal(LVecBase3::zero())) {
     indent(out, indent_level + 1) << "pos [ " <<
       _pos[0] << " " << _pos[1] << " " << _pos[2] << " ]\n";
   }
-  if (!_hpr.almost_equal(LVecBase3f::zero())) {
+  if (!_hpr.almost_equal(LVecBase3::zero())) {
     if (temp_hpr_fix) {
       indent(out, indent_level + 1) << "nhpr [ " <<
         _hpr[0] << " " << _hpr[1] << " " << _hpr[2] << " ]\n";
@@ -198,7 +198,7 @@ void DNASignText::write(std::ostream &out, DNAStorage *store, int indent_level) 
         _hpr[0] << " " << _hpr[1] << " " << _hpr[2] << " ]\n";
     }
   }
-  if (!_scale.almost_equal(LVecBase3f(1.0, 1.0, 1.0))) {
+  if (!_scale.almost_equal(LVecBase3(1.0, 1.0, 1.0))) {
     indent(out, indent_level + 1) << "scale [ " <<
       _scale[0] << " " << _scale[1] << " " << _scale[2] << " ]\n";
   }

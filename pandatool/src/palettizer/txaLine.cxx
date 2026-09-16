@@ -56,9 +56,9 @@ TxaLine() {
  * its constinuent parts.  Returns true if successful, false on error.
  */
 bool TxaLine::
-parse(const string &line) {
+parse(std::string_view line) {
   size_t colon = line.find(':');
-  if (colon == string::npos) {
+  if (colon == std::string_view::npos) {
     nout << "Colon required.\n";
     return false;
   }
@@ -357,6 +357,7 @@ match_egg(EggFile *egg_file) const {
     case KW_linear:
     case KW_mipmap:
     case KW_anisotropic:
+    case KW_srgb:
       // These mean nothing to an egg file.
       break;
 
@@ -423,7 +424,7 @@ match_texture(TextureImage *texture) const {
     case ST_explicit_3:
       request._got_num_channels = true;
       request._num_channels = _num_channels;
-      // fall through
+      [[fallthrough]];
 
     case ST_explicit_2:
       request._got_size = true;

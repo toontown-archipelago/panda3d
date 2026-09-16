@@ -206,7 +206,7 @@ void DNAFlatBuilding::setup_suit_flat_building(NodePath &parent,
   PT(PandaNode) suit_node = new ModelNode(name);
   NodePath suit_building_node_path = parent.attach_new_node(suit_node);
   // Size and place it correctly:
-  LVector3f scale = get_scale();
+  LVector3 scale = get_scale();
   scale[2]*=DNAWall::current_wall_height;
   suit_building_node_path.set_pos_hpr_scale(get_pos(), get_hpr(), scale);
   // Pick a suit wall:
@@ -262,7 +262,7 @@ void DNAFlatBuilding::setup_cogdo_flat_building(NodePath &parent,
   PT(PandaNode) suit_node = new ModelNode(name);
   NodePath suit_building_node_path = parent.attach_new_node(suit_node);
   // Size and place it correctly:
-  LVector3f scale = get_scale();
+  LVector3 scale = get_scale();
   scale[2]*=DNAWall::current_wall_height;
   suit_building_node_path.set_pos_hpr_scale(get_pos(), get_hpr(), scale);
   // Pick a suit wall:
@@ -636,7 +636,7 @@ void DNALandmarkBuilding::write(std::ostream &out, DNAStorage *store, int indent
   }
 
   // Do not write out color if it is white to save work
-  if (!_wall_color.almost_equal(LVecBase4f(1.0, 1.0, 1.0, 1.0))) {
+  if (!_wall_color.almost_equal(LVecBase4(1.0, 1.0, 1.0, 1.0))) {
     indent(out, indent_level + 1) << "color [ " <<
       _wall_color[0] << " " << _wall_color[1] << " " << _wall_color[2] << " " << _wall_color[3] <<
       " ]\n";

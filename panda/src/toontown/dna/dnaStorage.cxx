@@ -149,7 +149,7 @@ void DNAStorage::store_font(const std::string &code_string, PT(TextFont) font) {
 //               create a new point and store that.
 ////////////////////////////////////////////////////////////////////
 PT(DNASuitPoint) DNAStorage::store_suit_point(DNASuitPoint::DNASuitPointType type,
-                                              LPoint3f pos) {
+                                              LPoint3 pos) {
   for(SuitPointVector::const_iterator i = _suit_point_vector.begin();
       i != _suit_point_vector.end();
       ++i) {
@@ -525,8 +525,8 @@ int DNAStorage::get_block_number_at(unsigned int index) const {
 //  Description: Store a block and zone
 ////////////////////////////////////////////////////////////////////
 void DNAStorage::store_block_door_pos_hpr(const std::string& block,
-    const LPoint3f& pos,
-    const LPoint3f& hpr) {
+    const LPoint3& pos,
+    const LPoint3& hpr) {
   nassertv(!block.empty());
   _block_door_pos_hpr_map[atoi(block.c_str())]=PosHpr(pos, hpr);
 }
@@ -593,7 +593,7 @@ int DNAStorage::get_door_pos_hpr_block_at(unsigned int index) const {
 //  Description: Store a block and zone
 ////////////////////////////////////////////////////////////////////
 void DNAStorage::store_block_sign_transform(const std::string& block,
-                                            const LMatrix4f& mat) {
+                                            const LMatrix4& mat) {
   nassertv(!block.empty());
   _block_sign_transform_map[atoi(block.c_str())]=mat;
 }
@@ -604,13 +604,13 @@ void DNAStorage::store_block_sign_transform(const std::string& block,
 //       Access: Public
 //  Description:
 ////////////////////////////////////////////////////////////////////
-const LMatrix4f& DNAStorage::get_sign_transform_from_block_number(int block_number) const {
+const LMatrix4& DNAStorage::get_sign_transform_from_block_number(int block_number) const {
   // Try to find this code in the map
   BlockToTransformMap::const_iterator i = _block_sign_transform_map.find(block_number);
   if (i == _block_sign_transform_map.end()) {
     dna_cat.error()
       << "block number: " << block_number << " not found in map" << std::endl;
-    return LMatrix4f::ident_mat();
+    return LMatrix4::ident_mat();
   }
   return (*i).second;
 }

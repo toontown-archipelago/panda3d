@@ -146,7 +146,7 @@ void DNAAnimBuilding::write(std::ostream &out, DNAStorage *store, int indent_lev
   }
 
   // Do not write out color if it is white to save work
-  if (!_wall_color.almost_equal(LVecBase4f(1.0, 1.0, 1.0, 1.0))) {
+  if (!_wall_color.almost_equal(LVecBase4(1.0, 1.0, 1.0, 1.0))) {
     indent(out, indent_level + 1) << "color [ " <<
       _wall_color[0] << " " << _wall_color[1] << " " << _wall_color[2] << " " << _wall_color[3] <<
       " ]\n";

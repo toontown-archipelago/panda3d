@@ -42,7 +42,7 @@ DNADoor::DNADoor(const DNADoor &door) :
 //       Access: Public
 //  Description:
 ////////////////////////////////////////////////////////////////////
-void DNADoor::set_color(const LColorf &color) {
+void DNADoor::set_color(const LColor &color) {
   _color = color;
 }
 
@@ -52,7 +52,7 @@ void DNADoor::set_color(const LColorf &color) {
 //       Access: Public
 //  Description:
 ////////////////////////////////////////////////////////////////////
-LColorf DNADoor::get_color() const {
+LColor DNADoor::get_color() const {
   return _color;
 }
 
@@ -130,13 +130,13 @@ NodePath DNADoor::traverse(NodePath &parent, DNAStorage *store, int editing) {
 
 void DNADoor::setup_door(NodePath& door_node_path,
     NodePath& parent, NodePath& door_origin, DNAStorage *store,
-    const std::string& block, const LVector4f& color) {
+    const std::string& block, const LVector4& color) {
   // Place the door at the bottom center of the building,
   // three feet out from the origin where the wall is
   door_node_path.set_pos_hpr_scale(door_origin,
-           LVector3f(0.0),
-           LVector3f(0.0),
-           LVector3f(1.0));
+           LVector3(0.0),
+           LVector3(0.0),
+           LVector3(1.0));
   door_node_path.set_color(color);
 
   // Rename the left hole in the door frame:
@@ -187,8 +187,8 @@ void DNADoor::setup_door(NodePath& door_node_path,
   rightDoor.set_color(color);
   leftDoor.set_color(color);
   // Color the holes
-  doorFrameHoleLeft.set_color(LVector4f(0.0, 0.0, 0.0, 1.0));
-  doorFrameHoleRight.set_color(LVector4f(0.0, 0.0, 0.0, 1.0));
+  doorFrameHoleLeft.set_color(LVector4(0.0, 0.0, 0.0, 1.0));
+  doorFrameHoleRight.set_color(LVector4(0.0, 0.0, 0.0, 1.0));
 
   // Set the trigger:
   NodePath doorTrigger = door_node_path.find("door_*_trigger");

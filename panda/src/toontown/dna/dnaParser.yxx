@@ -316,7 +316,7 @@ battle_cell:
         BATTLE_CELL '[' real real real real real ']'
 {
   // Make a new battle cell
-  PT(DNABattleCell) cell = new DNABattleCell($3, $4, LPoint3f($5, $6, $7));
+  PT(DNABattleCell) cell = new DNABattleCell($3, $4, LPoint3($5, $6, $7));
 
   // Store the battle cell in the dna storage
   dna_top_node->get_dna_storage()->store_battle_cell(cell);
@@ -1506,7 +1506,7 @@ pos:
         POS '[' real real real ']'
 {
   // An apparent compiler bug with MSVC prevents this line from compiling properly:
-  //  $$ = LVecBase3f($3, $4, $5);
+  //  $$ = LVecBase3($3, $4, $5);
 
   // Fortunately, this is functionally equivalent:
   $$.set($3, $4, $5);
@@ -1519,7 +1519,7 @@ hpr:
   if (temp_hpr_fix) {
     $$.set($3, $4, $5);
   } else {
-    $$ = new_to_old_hpr(LVecBase3f($3, $4, $5));
+    $$ = new_to_old_hpr(LVecBase3($3, $4, $5));
   }*/
   $$.set($3, $4, $5);
 }
@@ -1527,7 +1527,7 @@ hpr:
 {
   // Old (broken) HPR representation
   if (temp_hpr_fix) {
-    $$ = old_to_new_hpr(LVecBase3f($3, $4, $5));
+    $$ = old_to_new_hpr(LVecBase3($3, $4, $5));
   } else {
     $$.set($3, $4, $5);
   }
@@ -1722,7 +1722,7 @@ store_suit_point:
   PT(DNASuitPoint) point = new DNASuitPoint((int)$3,
                                             (DNASuitPoint::DNASuitPointType)(int
 )$4,
-                                            LPoint3f($5, $6, $7));
+                                            LPoint3($5, $6, $7));
   dna_top_node->get_dna_storage()->store_suit_point(point);
 }
         | STORE_SUIT_POINT '[' integer integer real real real integer ']'
@@ -1731,7 +1731,7 @@ store_suit_point:
   PT(DNASuitPoint) point = new DNASuitPoint((int)$3,
                                             (DNASuitPoint::DNASuitPointType)(int
 )$4,
-                                            LPoint3f($5, $6, $7),
+                                            LPoint3($5, $6, $7),
                                             (int)$8);
   dna_top_node->get_dna_storage()->store_suit_point(point);
 }
@@ -1739,14 +1739,14 @@ store_suit_point:
 {
   // Current syntax, without lb_index.
   PT(DNASuitPoint) point = new DNASuitPoint((int)$3, $5,
-                                            LPoint3f($7, $8, $9));
+                                            LPoint3($7, $8, $9));
   dna_top_node->get_dna_storage()->store_suit_point(point);
 }
         | STORE_SUIT_POINT '[' integer ',' suit_point_type ',' real real real ',' integer ']'
 {
   // Current syntax, with lb_index.
   PT(DNASuitPoint) point = new DNASuitPoint((int)$3, $5,
-                                            LPoint3f($7, $8, $9),
+                                            LPoint3($7, $8, $9),
                                             (int)$11);
   dna_top_node->get_dna_storage()->store_suit_point(point);
 }

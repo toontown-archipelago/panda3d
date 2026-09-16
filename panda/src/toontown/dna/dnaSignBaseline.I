@@ -15,11 +15,11 @@ get_code() const {
 }
 
 INLINE void DNASignBaseline::
-set_color(const LColorf &color) {
+set_color(const LColor &color) {
   _color = color;
 }
 
-INLINE LColorf DNASignBaseline::
+INLINE LColor DNASignBaseline::
 get_color() const {
   return _color;
 }

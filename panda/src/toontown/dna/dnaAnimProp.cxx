@@ -120,12 +120,12 @@ void DNAAnimProp::write(std::ostream &out, DNAStorage *store, int indent_level) 
   }
 
   // Only write out scale if it is not unity. This saves uneccessary work
-  if (!_scale.almost_equal(LVecBase3f(1.0, 1.0, 1.0))) {
+  if (!_scale.almost_equal(LVecBase3(1.0, 1.0, 1.0))) {
     indent(out, indent_level + 1) << "scale [ " <<
       _scale[0] << " " << _scale[1] << " " << _scale[2] << " ]\n";
   }
   // Only write out color if it is not white. This saves uneccessary work
-  if (!_color.almost_equal(LVecBase4f(1.0, 1.0, 1.0, 1.0))) {
+  if (!_color.almost_equal(LVecBase4(1.0, 1.0, 1.0, 1.0))) {
     indent(out, indent_level + 1) << "color [ " <<
       _color[0] << " " << _color[1] << " " << _color[2] << " " << _color[3] <<
       " ]\n";

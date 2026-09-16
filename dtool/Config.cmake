@@ -221,19 +221,13 @@ mark_as_advanced(DEFAULT_PRC_DIR PRC_DIR_ENVVARS PRC_PATH_ENVVARS
 # The following options relate to interrogate, the tool that is
 # used to generate bindings for non-C++ languages.
 
-option(WANT_INTERROGATE
-  "Do you want to include Interrogate in the installation? This
-program reads C++ source files and generates bindings for another
-language.  If you won't be building interfaces for other languages,
-you don't need the program." ON)
-
 cmake_dependent_option(INTERROGATE_PYTHON_INTERFACE
   "Do you want to generate a Python-callable interrogate interface?
 This is only necessary if you plan to make calls into Panda from a
 program written in Python.  This is done only if HAVE_PYTHON is also
 true." ON "HAVE_PYTHON" OFF)
 
-set(INTERROGATE_C_INTERFACE
+option(INTERROGATE_C_INTERFACE
   "Do you want to generate a C-callable interrogate interface?  This
 generates an interface similar to the Python interface above, with
 a C calling convention.  It should be useful for most other kinds
@@ -249,7 +243,79 @@ option(INTERROGATE_VERBOSE
   "Set this if you would like interrogate to generate advanced
 debugging information." OFF)
 
+# This is a dependent option so that it is re-evaluated when the interfaces
+# are toggled later on (eg. when Python is enabled on a reconfiguration),
+# rather than permanently latching the default from the first configure.
+cmake_dependent_option(BUILD_INTERROGATE
+  "Do you want to build interrogate from source?  This is necessary
+if you wish to build Python or other bindings around Panda3D's C++
+interface.  Set this to false if you already have a compatible
+version of interrogate installed." ON
+  "INTERROGATE_PYTHON_INTERFACE OR INTERROGATE_C_INTERFACE" OFF)
+
 mark_as_advanced(INTERROGATE_OPTIONS)
+
+if(BUILD_INTERROGATE)
+  include(ExternalProject)
+
+  set(_interrogate_dir "${PROJECT_BINARY_DIR}/interrogate")
+
+  ExternalProject_Add(
+    panda3d-interrogate
+
+    GIT_REPOSITORY https://github.com/panda3d/interrogate.git
+    GIT_TAG 47ff6da7705062b1bc7f9847fc8ca0c92b82e6eb
+
+    PREFIX ${_interrogate_dir}
+    CMAKE_ARGS
+      -DHAVE_PYTHON=OFF
+      -DBUILD_SHARED_LIBS=OFF
+      -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
+
+    EXCLUDE_FROM_ALL ON
+    BUILD_BYPRODUCTS "${_interrogate_dir}/bin/interrogate${CMAKE_EXECUTABLE_SUFFIX}"
+                     "${_interrogate_dir}/bin/interrogate_module${CMAKE_EXECUTABLE_SUFFIX}"
+  )
+
+  add_executable(interrogate IMPORTED GLOBAL)
+  add_dependencies(interrogate panda3d-interrogate)
+  set_target_properties(interrogate PROPERTIES
+    IMPORTED_LOCATION "${_interrogate_dir}/bin/interrogate${CMAKE_EXECUTABLE_SUFFIX}")
+
+  add_executable(interrogate_module IMPORTED GLOBAL)
+  add_dependencies(interrogate_module panda3d-interrogate)
+  set_target_properties(interrogate_module PROPERTIES
+    IMPORTED_LOCATION "${_interrogate_dir}/bin/interrogate_module${CMAKE_EXECUTABLE_SUFFIX}")
+
+else()
+  find_program(INTERROGATE_EXECUTABLE interrogate)
+  find_program(INTERROGATE_MODULE_EXECUTABLE interrogate_module)
+
+  add_executable(interrogate IMPORTED GLOBAL)
+  if(INTERROGATE_EXECUTABLE)
+    set_target_properties(interrogate PROPERTIES
+      IMPORTED_LOCATION "${INTERROGATE_EXECUTABLE}")
+
+  elseif(INTERROGATE_PYTHON_INTERFACE OR INTERROGATE_C_INTERFACE)
+    message(FATAL_ERROR
+      "Requested interrogate bindings, but interrogate not found.  Set "
+      "BUILD_INTERROGATE to build interrogate from source, or set "
+      "INTERROGATE_EXECUTABLE to the location of this tool.")
+  endif()
+
+  add_executable(interrogate_module IMPORTED GLOBAL)
+  if(INTERROGATE_MODULE_EXECUTABLE)
+    set_target_properties(interrogate_module PROPERTIES
+      IMPORTED_LOCATION "${INTERROGATE_MODULE_EXECUTABLE}")
+
+  elseif(INTERROGATE_PYTHON_INTERFACE)
+    message(FATAL_ERROR
+      "Requested interrogate bindings, but interrogate not found.  Set "
+      "BUILD_INTERROGATE to build interrogate from source, or set "
+      "INTERROGATE_MODULE_EXECUTABLE to the location of this tool.")
+  endif()
+
+endif()
 
 #
 # The following options have to do with optional debugging features.
@@ -293,7 +359,7 @@ mark_as_advanced(SIMULATE_NETWORK_DELAY DO_MEMORY_USAGE DO_DCAST)
 # The following options have to do with the memory allocation system.
 #
 
-find_package(MIMALLOC 1.0 QUIET)
+find_package(MIMALLOC QUIET)
 
 package_option(MIMALLOC
   "The mimalloc allocator.  See also USE_MEMORY_MIMALLOC, which
@@ -359,6 +425,14 @@ else()
 endif()
 
 unset(_prefer_mimalloc)
+
+#
+# Sanitizers
+#
+
+option(ENABLE_ASAN
+  "Enable AddressSanitizer for detecting memory errors such as
+buffer overflows, use-after-free, etc. Requires GCC or Clang." OFF)
 
 #
 # This section relates to mobile-device/phone support and options

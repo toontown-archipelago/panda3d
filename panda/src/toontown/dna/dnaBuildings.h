@@ -34,8 +34,8 @@ PUBLISHED:
   INLINE void set_height(float height);
   INLINE float get_height() const ;
 
-  INLINE void set_color(const LColorf &color);
-  INLINE LColorf get_color() const;
+  INLINE void set_color(const LColor &color);
+  INLINE LColor get_color() const;
 
 public:
   ////////////////////////////////////////////////////////////////////
@@ -52,7 +52,7 @@ private:
 private:
   std::string _code;
   float _height;
-  LColorf _color;
+  LColor _color;
 
 public:
   static TypeHandle get_class_type() {
@@ -145,8 +145,8 @@ PUBLISHED:
   INLINE void set_code(std::string code);
   INLINE std::string get_code() const;
 
-  INLINE void set_wall_color(const LColorf &color);
-  INLINE LColorf get_wall_color() const;
+  INLINE void set_wall_color(const LColor &color);
+  INLINE LColor get_wall_color() const;
 
   INLINE void set_building_type(const std::string& type);
   INLINE std::string get_building_type() const;
@@ -160,7 +160,7 @@ private:
 
 protected:
   std::string _code;
-  LColorf _wall_color;
+  LColor _wall_color;
   std::string _title;
   std::string _article;
   std::string _building_type;

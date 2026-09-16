@@ -28,7 +28,7 @@ INLINE std::string DNAStreet::get_code() const {
 //       Access: Public
 //  Description: sets the color of the street node
 ////////////////////////////////////////////////////////////////////
-INLINE void DNAStreet::set_street_color(const LColorf &color) {
+INLINE void DNAStreet::set_street_color(const LColor &color) {
   _street_color = color;
 }
 
@@ -38,7 +38,7 @@ INLINE void DNAStreet::set_street_color(const LColorf &color) {
 //       Access: Public
 //  Description: returns the color of the street node
 ////////////////////////////////////////////////////////////////////
-INLINE LColorf DNAStreet::get_street_color() const {
+INLINE LColor DNAStreet::get_street_color() const {
   return _street_color;
 }
 
@@ -48,7 +48,7 @@ INLINE LColorf DNAStreet::get_street_color() const {
 //       Access: Public
 //  Description: sets the color of the sidewalk node
 ////////////////////////////////////////////////////////////////////
-INLINE void DNAStreet::set_sidewalk_color(const LColorf &color) {
+INLINE void DNAStreet::set_sidewalk_color(const LColor &color) {
   _sidewalk_color = color;
 }
 
@@ -58,7 +58,7 @@ INLINE void DNAStreet::set_sidewalk_color(const LColorf &color) {
 //       Access: Public
 //  Description: returns the color of the sidewalk node
 ////////////////////////////////////////////////////////////////////
-INLINE LColorf DNAStreet::get_sidewalk_color() const {
+INLINE LColor DNAStreet::get_sidewalk_color() const {
   return _sidewalk_color;
 }
 
@@ -68,7 +68,7 @@ INLINE LColorf DNAStreet::get_sidewalk_color() const {
 //       Access: Public
 //  Description: sets the color of the sidewalk node
 ////////////////////////////////////////////////////////////////////
-INLINE void DNAStreet::set_curb_color(const LColorf &color) {
+INLINE void DNAStreet::set_curb_color(const LColor &color) {
   _curb_color = color;
 }
 
@@ -77,7 +77,7 @@ INLINE void DNAStreet::set_curb_color(const LColorf &color) {
 //       Access: Public
 //  Description: returns the color of the curb node
 ////////////////////////////////////////////////////////////////////
-INLINE LColorf DNAStreet::get_curb_color() const {
+INLINE LColor DNAStreet::get_curb_color() const {
   return _curb_color;
 }
 

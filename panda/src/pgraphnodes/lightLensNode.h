@@ -20,7 +20,7 @@
 #include "camera.h"
 #include "graphicsStateGuardianBase.h"
 #include "graphicsOutputBase.h"
-#include "atomicAdjust.h"
+#include "patomic.h"
 
 class ShaderGenerator;
 class GraphicsStateGuardian;
@@ -32,7 +32,7 @@ class GraphicsStateGuardian;
  */
 class EXPCL_PANDA_PGRAPHNODES LightLensNode : public Light, public Camera {
 PUBLISHED:
-  explicit LightLensNode(const std::string &name, Lens *lens = new PerspectiveLens());
+  explicit LightLensNode(std::string name, Lens *lens = new PerspectiveLens());
   virtual ~LightLensNode();
 
   INLINE bool has_specular_color() const;
@@ -42,6 +42,7 @@ PUBLISHED:
   void set_shadow_caster(bool caster, int buffer_xsize, int buffer_ysize, int sort = -10);
 
   INLINE int get_shadow_buffer_sort() const;
+  INLINE void set_shadow_buffer_sort(int sort);
 
   INLINE LVecBase2i get_shadow_buffer_size() const;
   INLINE void set_shadow_buffer_size(const LVecBase2i &size);
@@ -50,6 +51,7 @@ PUBLISHED:
 
 PUBLISHED:
   MAKE_PROPERTY(shadow_caster, is_shadow_caster);
+  MAKE_PROPERTY(shadow_buffer_sort, get_shadow_buffer_sort, set_shadow_buffer_sort);
   MAKE_PROPERTY(shadow_buffer_size, get_shadow_buffer_size, set_shadow_buffer_size);
 
 public:
@@ -74,7 +76,7 @@ protected:
 
   // This counts how many LightAttribs in the world are referencing this
   // LightLensNode object.
-  AtomicAdjust::Integer _attrib_count;
+  patomic<int> _attrib_count { 0 };
 
 public:
   virtual void attrib_ref();

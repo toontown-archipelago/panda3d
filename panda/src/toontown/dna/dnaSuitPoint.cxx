@@ -38,7 +38,7 @@ operator << (std::ostream &out, DNASuitPoint::DNASuitPointType type) {
 //       Access: Public
 //  Description:
 ////////////////////////////////////////////////////////////////////
-DNASuitPoint::DNASuitPoint(int index, DNASuitPointType type, LPoint3f pos, int lb_index) {
+DNASuitPoint::DNASuitPoint(int index, DNASuitPointType type, LPoint3 pos, int lb_index) {
   // The index gets set when the point is stored in the dnaStorage
   _index = index;
   _type = type;

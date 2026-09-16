@@ -107,7 +107,7 @@ if(HAVE_FREETYPE)
 endif()
 
 if(INTERROGATE_PYTHON_INTERFACE)
-  add_python_module(panda3d.core ${CORE_MODULE_COMPONENTS} LINK panda)
+  add_python_module(panda3d.core ${CORE_MODULE_COMPONENTS} LINK panda INIT pyenv_init)
 
   # Generate our __init__.py
   if(WIN32)
@@ -162,7 +162,7 @@ del core, scope, name
     file(WRITE "${PROJECT_BINARY_DIR}/panda3d/__init__.py" ${init_file})
     file(WRITE "${PROJECT_BINARY_DIR}/panda3d/dtoolconfig.py" ${dtoolconfig_file})
     if(HAVE_NET)
-      file(WRITE "${PROJECT_BINARY_DIR}/${config}/panda3d/net.py" ${net_file})
+      file(WRITE "${PROJECT_BINARY_DIR}/panda3d/net.py" ${net_file})
     endif()
   endif()
 

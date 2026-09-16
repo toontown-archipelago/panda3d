@@ -145,16 +145,16 @@ void DNASign::write(std::ostream &out, DNAStorage *store, int indent_level) cons
     indent(out, indent_level + 1) << "code [ " <<
       '"' << _code << '"' << " ]\n";
   }
-  if (!_color.almost_equal(LVecBase4f(1.0, 1.0, 1.0, 1.0))) {
+  if (!_color.almost_equal(LVecBase4(1.0, 1.0, 1.0, 1.0))) {
     indent(out, indent_level + 1) << "color [ " <<
       _color[0] << " " << _color[1] << " " <<
       _color[2] << " " << _color[3] << " ]\n";
   }
-  if (!_pos.almost_equal(LVecBase3f::zero())) {
+  if (!_pos.almost_equal(LVecBase3::zero())) {
     indent(out, indent_level + 1) << "pos [ " <<
       _pos[0] << " " << _pos[1] << " " << _pos[2] << " ]\n";
   }
-  if (!_hpr.almost_equal(LVecBase3f::zero())) {
+  if (!_hpr.almost_equal(LVecBase3::zero())) {
     if (temp_hpr_fix) {
       indent(out, indent_level + 1) << "nhpr [ " <<
         _hpr[0] << " " << _hpr[1] << " " << _hpr[2] << " ]\n";
@@ -163,7 +163,7 @@ void DNASign::write(std::ostream &out, DNAStorage *store, int indent_level) cons
         _hpr[0] << " " << _hpr[1] << " " << _hpr[2] << " ]\n";
     }
   }
-  if (!_scale.almost_equal(LVecBase3f(1.0, 1.0, 1.0))) {
+  if (!_scale.almost_equal(LVecBase3(1.0, 1.0, 1.0))) {
     indent(out, indent_level + 1) << "scale [ " <<
       _scale[0] << " " << _scale[1] << " " << _scale[2] << " ]\n";
   }

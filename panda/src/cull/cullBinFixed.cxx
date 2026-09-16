@@ -24,24 +24,12 @@
 TypeHandle CullBinFixed::_type_handle;
 
 /**
- *
- */
-CullBinFixed::
-~CullBinFixed() {
-  Objects::iterator oi;
-  for (oi = _objects.begin(); oi != _objects.end(); ++oi) {
-    CullableObject *object = (*oi)._object;
-    delete object;
-  }
-}
-
-/**
  * Factory constructor for passing to the CullBinManager.
  */
 CullBin *CullBinFixed::
-make_bin(const std::string &name, GraphicsStateGuardianBase *gsg,
+make_bin(std::string name, GraphicsStateGuardianBase *gsg,
          const PStatCollector &draw_region_pcollector) {
-  return new CullBinFixed(name, gsg, draw_region_pcollector);
+  return new CullBinFixed(std::move(name), gsg, draw_region_pcollector);
 }
 
 /**

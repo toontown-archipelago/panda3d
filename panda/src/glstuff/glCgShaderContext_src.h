@@ -34,7 +34,7 @@ public:
   ALLOC_DELETED_CHAIN(CLP(CgShaderContext));
 
   bool valid(void) override;
-  void bind() override;
+  void bind(GraphicsStateGuardian *gsg) override;
   void unbind() override;
 
   void set_state_and_transform(const RenderState *state,
@@ -76,6 +76,7 @@ private:
   long _slider_table_size;
 
   LVecBase4f *_mat_part_cache = nullptr;
+  LVecBase4f *_mat_scratch_space = nullptr;
   pvector<CGparameter> _cg_parameter_map;
 
   WCPT(RenderState) _state_rs;

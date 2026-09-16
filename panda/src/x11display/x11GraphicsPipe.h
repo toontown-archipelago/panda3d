@@ -134,7 +134,7 @@ class FrameBufferProperties;
  */
 class x11GraphicsPipe : public GraphicsPipe {
 public:
-  x11GraphicsPipe(const std::string &display = std::string());
+  x11GraphicsPipe(std::string display = std::string());
   virtual ~x11GraphicsPipe();
 
   INLINE X11_Display *get_display() const;
@@ -174,6 +174,7 @@ public:
   Atom _net_startup_info;
   Atom _net_startup_info_begin;
   Atom _net_wm_bypass_compositor;
+  Atom _net_wm_name;
   Atom _net_wm_pid;
   Atom _net_wm_ping;
   Atom _net_wm_state;

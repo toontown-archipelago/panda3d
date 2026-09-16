@@ -24,13 +24,13 @@ class DNAStorage;
 ////////////////////////////////////////////////////////////////////
 class EXPCL_TOONTOWN DNABattleCell : public TypedReferenceCount  {
 PUBLISHED:
-  DNABattleCell(float width, float height, LPoint3f pos);
+  DNABattleCell(float width, float height, LPoint3 pos);
 
   INLINE void set_width_height(float width, float height);
   INLINE float get_width() const;
   INLINE float get_height() const;
-  INLINE void set_pos(LPoint3f pos);
-  INLINE LPoint3f get_pos() const;
+  INLINE void set_pos(LPoint3 pos);
+  INLINE LPoint3 get_pos() const;
   void output(std::ostream &out) const;
 
   virtual NodePath traverse(NodePath &parent, DNAStorage *store, int editing=0);
@@ -39,7 +39,7 @@ PUBLISHED:
 private:
   float _width;
   float _height;
-  LPoint3f _pos;
+  LPoint3 _pos;
 
 public:
   static TypeHandle get_class_type() {

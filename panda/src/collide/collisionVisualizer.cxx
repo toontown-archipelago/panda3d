@@ -41,7 +41,7 @@ TypeHandle CollisionVisualizer::_type_handle;
  *
  */
 CollisionVisualizer::
-CollisionVisualizer(const std::string &name) : PandaNode(name), _lock("CollisionVisualizer") {
+CollisionVisualizer(std::string name) : PandaNode(std::move(name)), _lock("CollisionVisualizer") {
   set_cull_callback();
   set_renderable();
 
@@ -207,11 +207,8 @@ cull_callback(CullTraverser *trav, CullTraverserData &data) {
           PT(Geom) geom = new Geom(point_vdata);
           geom->add_primitive(points);
 
-          CullableObject *object =
-            new CullableObject(geom, point_state,
-                               xform_data.get_internal_transform(trav));
-
-          trav->get_cull_handler()->record_object(object, trav);
+          trav->get_cull_handler()->record_object(CullableObject(
+            geom, point_state, xform_data.get_internal_transform(trav)), trav);
         }
 
         // Draw the normal vector at the surface point.
@@ -236,11 +233,8 @@ cull_callback(CullTraverser *trav, CullTraverserData &data) {
           PT(Geom) geom = new Geom(line_vdata);
           geom->add_primitive(lines);
 
-          CullableObject *object =
-            new CullableObject(geom, empty_state,
-                               xform_data.get_internal_transform(trav));
-
-          trav->get_cull_handler()->record_object(object, trav);
+          trav->get_cull_handler()->record_object(CullableObject(
+            geom, empty_state, xform_data.get_internal_transform(trav)), trav);
         }
       }
     }

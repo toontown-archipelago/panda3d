@@ -91,7 +91,7 @@ get_point_b() const {
 //       Access: Published
 //  Description: Returns the point in space associated with point A.
 ////////////////////////////////////////////////////////////////////
-INLINE LPoint3f SuitLeg::
+INLINE LPoint3 SuitLeg::
 get_pos_a() const {
   return _pos_a;
 }
@@ -101,7 +101,7 @@ get_pos_a() const {
 //       Access: Published
 //  Description: Returns the point in space associated with point B.
 ////////////////////////////////////////////////////////////////////
-INLINE LPoint3f SuitLeg::
+INLINE LPoint3 SuitLeg::
 get_pos_b() const {
   return _pos_b;
 }

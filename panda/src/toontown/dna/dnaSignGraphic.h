@@ -28,8 +28,8 @@ PUBLISHED:
   void set_code(std::string code);
   std::string get_code() const;
 
-  void set_color(const LColorf &color);
-  LColorf get_color() const;
+  void set_color(const LColor &color);
+  LColor get_color() const;
 
   void set_width(float width);
   float get_width() const;
@@ -42,7 +42,7 @@ private:
 
 private:
   std::string _code;
-  LColorf _color;
+  LColor _color;
   float _width;
   float _height;
   bool _use_baseline_color;

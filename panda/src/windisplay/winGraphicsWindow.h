@@ -64,7 +64,7 @@ typedef struct tagTOUCHINPUT {
 class EXPCL_PANDAWIN WinGraphicsWindow : public GraphicsWindow {
 public:
   WinGraphicsWindow(GraphicsEngine *engine, GraphicsPipe *pipe,
-                    const std::string &name,
+                    std::string name,
                     const FrameBufferProperties &fb_prop,
                     const WindowProperties &win_prop,
                     int flags,
@@ -198,6 +198,8 @@ private:
 
   UINT _num_touches;
   TOUCHINPUT _touches[MAX_TOUCHES];
+
+  bool _in_adjust_z_order = false;
 
 private:
   // We need this map to support per-window calls to window_proc().

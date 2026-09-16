@@ -65,9 +65,9 @@ PUBLISHED:
 
   INLINE int get_point_a() const;
   INLINE int get_point_b() const;
-  INLINE LPoint3f get_pos_a() const;
-  INLINE LPoint3f get_pos_b() const;
-  LPoint3f get_pos_at_time(double time) const;
+  INLINE LPoint3 get_pos_a() const;
+  INLINE LPoint3 get_pos_b() const;
+  LPoint3 get_pos_at_time(double time) const;
 
   static std::string get_type_name(Type type);
 
@@ -81,8 +81,8 @@ private:
   int _block_number;
   int _point_a;
   int _point_b;
-  LPoint3f _pos_a;
-  LPoint3f _pos_b;
+  LPoint3 _pos_a;
+  LPoint3 _pos_b;
 
   friend class SuitLegList;
 };

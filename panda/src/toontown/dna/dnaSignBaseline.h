@@ -33,8 +33,8 @@ PUBLISHED:
   INLINE void set_code(std::string code);
   INLINE std::string get_code() const;
 
-  INLINE void set_color(const LColorf &color);
-  INLINE LColorf get_color() const;
+  INLINE void set_color(const LColor &color);
+  INLINE LColor get_color() const;
 
   INLINE void set_font(TextFont *font);
   INLINE TextFont *get_font() const;
@@ -73,17 +73,17 @@ PUBLISHED:
   void inc_counter();
 
   virtual void baseline_next_pos_hpr_scale(
-    LVector3f &pos, LVector3f &hpr, LVector3f &scale,
-    const LVector3f &size);
+    LVector3 &pos, LVector3 &hpr, LVector3 &scale,
+    const LVector3 &size);
 
 protected:
   std::string _code;
   std::string _flags;
-  LColorf _color;
+  LColor _color;
   PT(TextFont) _font;
-  LVector3f _next_pos;
-  LVector3f _next_hpr;
-  LVector3f _next_scale;
+  LVector3 _next_pos;
+  LVector3 _next_hpr;
+  LVector3 _next_scale;
   float _indent;
   float _kern;
   float _wiggle;
@@ -99,17 +99,17 @@ protected:
   bool _priorCharWasBlank;
 
   virtual void reset();
-  void center(LVector3f &pos, LVector3f &hpr);
+  void center(LVector3 &pos, LVector3 &hpr);
 
   // Lines:
   void line_next_pos_hpr_scale(
-    LVector3f &pos, LVector3f &hpr, LVector3f &scale,
-    const LVector3f &size);
+    LVector3 &pos, LVector3 &hpr, LVector3 &scale,
+    const LVector3 &size);
 
   // Circles:
   void circle_next_pos_hpr_scale(
-    LVector3f &pos, LVector3f &hpr, LVector3f &scale,
-    const LVector3f &size);
+    LVector3 &pos, LVector3 &hpr, LVector3 &scale,
+    const LVector3 &size);
 
 private:
   virtual DNAGroup* make_copy();

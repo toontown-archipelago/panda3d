@@ -165,6 +165,17 @@ event_0(const Event *event, void *) {
 }
 
 void
+event_R(const Event *event, void *) {
+  // shift-R(eload): reload all textures
+  TextureCollection collection = TexturePool::get_global_ptr()->find_all_textures("*");
+  for (int i = 0; i < collection.size(); ++i)
+  {
+    nout << "Reloading texture " << collection[i]->get_filename() << std::endl;
+    collection[i]->reload();
+  }
+}
+
+void
 usage() {
   cerr <<
     "\n"
@@ -240,8 +251,8 @@ report_version() {
 //
 class AdjustCameraClipPlanesTask : public AsyncTask {
 public:
-  AdjustCameraClipPlanesTask(const std::string &name, Camera *camera) :
-    AsyncTask(name), _camera(camera), _lens(camera->get_lens(0)), _sphere(nullptr)
+  AdjustCameraClipPlanesTask(std::string name, Camera *camera) :
+    AsyncTask(std::move(name)), _camera(camera), _lens(camera->get_lens(0)), _sphere(nullptr)
   {
     NodePath np = framework.get_models();
     PT(BoundingVolume) volume = np.get_bounds();
@@ -513,6 +524,7 @@ main(int argc, char **argv) {
     framework.define_key("shift-f", "flatten hierarchy", event_F, nullptr);
     framework.define_key("alt-enter", "toggle between window/fullscreen", event_Enter, nullptr);
     framework.define_key("2", "split the window", event_2, nullptr);
+    framework.define_key("shift-r", "reload textures", event_R, nullptr);
     if (pview_test_hack) {
       framework.define_key("0", "run quick hacky test", event_0, nullptr);
     }

@@ -26,10 +26,10 @@ INLINE float DNABattleCell::get_height() const {
 }
 
 
-INLINE LPoint3f DNABattleCell::get_pos() const {
+INLINE LPoint3 DNABattleCell::get_pos() const {
   return _pos;
 }
 
-INLINE void DNABattleCell::set_pos(LPoint3f pos) {
+INLINE void DNABattleCell::set_pos(LPoint3 pos) {
   _pos = pos;
 }

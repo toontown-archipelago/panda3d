@@ -80,9 +80,9 @@ void DNANode::write(std::ostream &out, DNAStorage *store, int indent_level) cons
   out << '"' << get_name() << '"' << " [\n";
 
   // If none of the properties are set, do not write them out
-  if ((!_pos.almost_equal(LVecBase3f::zero())) ||
-      (!_hpr.almost_equal(LVecBase3f::zero())) ||
-      (!_scale.almost_equal(LVecBase3f(1.0, 1.0, 1.0)))) {
+  if ((!_pos.almost_equal(LVecBase3::zero())) ||
+      (!_hpr.almost_equal(LVecBase3::zero())) ||
+      (!_scale.almost_equal(LVecBase3(1.0, 1.0, 1.0)))) {
     // Write out all properties
     indent(out, indent_level + 1) << "pos [ " <<
       _pos[0] << " " << _pos[1] << " " << _pos[2] << " ]\n";

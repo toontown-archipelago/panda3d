@@ -20,8 +20,8 @@ format_string(const Thing &thing) {
 }
 
 INLINE std::string
-format_string(const std::string &value) {
-  return value;
+format_string(std::string_view value) {
+  return std::string(value);
 }
 
 INLINE std::string
@@ -32,7 +32,7 @@ format_string(bool value) {
 INLINE std::string
 format_string(float value) {
   char buffer[32];
-  pdtoa((double)value, buffer);
+  pftoa(value, buffer);
   return std::string(buffer);
 }
 

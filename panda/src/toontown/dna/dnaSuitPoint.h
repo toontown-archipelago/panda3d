@@ -28,13 +28,13 @@ PUBLISHED:
     COGHQ_OUT_POINT
   };
 
-  DNASuitPoint(int index, DNASuitPointType type, LPoint3f pos, int lb_index = -1);
+  DNASuitPoint(int index, DNASuitPointType type, LPoint3 pos, int lb_index = -1);
   INLINE void set_index(int index);
   INLINE int get_index() const;
   INLINE void set_point_type(DNASuitPointType type);
   INLINE DNASuitPointType get_point_type() const;
-  INLINE void set_pos(LPoint3f pos);
-  INLINE LPoint3f get_pos() const;
+  INLINE void set_pos(LPoint3 pos);
+  INLINE LPoint3 get_pos() const;
   INLINE void set_graph_id(int graph_id);
   INLINE int get_graph_id() const;
   INLINE void set_landmark_building_index(int lb_index);
@@ -49,7 +49,7 @@ PUBLISHED:
 private:
   int _index;
   DNASuitPointType _type;
-  LPoint3f _pos;
+  LPoint3 _pos;
   // Sequence number to identify which of several disconnected graphs
   // the suit point may belong to.
   int _graph_id;

@@ -42,7 +42,7 @@ void main() {{
 """
 
 
-def run_glsl_test(gsg, body, preamble="", inputs={}, version=150, exts=set()):
+def run_glsl_test(gsg, body, preamble="", inputs={}, version=150, exts=set(), state=None):
     """ Runs a GLSL test on the given GSG.  The given body is executed in the
     main function and should call assert().  The preamble should contain all
     of the shader inputs. """
@@ -84,10 +84,15 @@ def run_glsl_test(gsg, body, preamble="", inputs={}, version=150, exts=set()):
         attrib = attrib.set_shader_input(name, value)
     attrib = attrib.set_shader_input('_triggered', result)
 
+    if not state:
+        state = core.RenderState.make(attrib)
+    else:
+        state = state.set_attrib(attrib)
+
     # Run the compute shader.
     engine = core.GraphicsEngine.get_global_ptr()
     try:
-        engine.dispatch_compute((1, 1, 1), attrib, gsg)
+        engine.dispatch_compute((1, 1, 1), state, gsg)
     except AssertionError as exc:
         assert False, "Error executing compute shader:\n" + code
 
@@ -112,7 +117,7 @@ def run_glsl_compile_check(gsg, vert_path, frag_path, expect_fail=False):
     assert shader is not None
 
     if not gsg.supports_glsl:
-        expect_fail = True
+        pytest.skip("GLSL shaders not supported")
 
     shader.prepare_now(gsg.prepared_objects, gsg)
     assert shader.is_prepared(gsg.prepared_objects)
@@ -120,6 +125,27 @@ def run_glsl_compile_check(gsg, vert_path, frag_path, expect_fail=False):
         assert shader.get_error_flag()
     else:
         assert not shader.get_error_flag()
+
+
+@pytest.fixture(scope='module')
+def glsl_gsg(gsg):
+    """Like gsg, but skips if the GL context can't compile GLSL programs."""
+    if not gsg.supports_glsl:
+        pytest.skip("GLSL shaders not supported")
+
+    if (gsg.driver_shader_version_major, gsg.driver_shader_version_minor) < (1, 50):
+        vert = "#version 120\nattribute vec4 p3d_Vertex;\nvoid main() { gl_Position = p3d_Vertex; }"
+        frag = "#version 120\nvoid main() { gl_FragColor = vec4(1.0); }"
+    else:
+        vert = "#version 150\nin vec4 p3d_Vertex;\nvoid main() { gl_Position = p3d_Vertex; }"
+        frag = "#version 150\nout vec4 p3d_FragColor;\nvoid main() { p3d_FragColor = vec4(1.0); }"
+
+    shader = core.Shader.make(core.Shader.SL_GLSL, vert, frag)
+    shader.prepare_now(gsg.prepared_objects, gsg)
+    if not shader.is_prepared(gsg.prepared_objects) or shader.get_error_flag():
+        pytest.skip("GL context cannot compile GLSL programs")
+
+    return gsg
 
 
 def test_glsl_test(gsg):
@@ -294,11 +320,11 @@ def test_glsl_uimage(gsg):
 
 
 def test_glsl_ssbo(gsg):
-    from struct import pack
+    from struct import pack, unpack
     num1 = pack('<i', 1234567)
-    num2 = pack('<i', -1234567)
-    buffer1 = core.ShaderBuffer("buffer1", num1, core.GeomEnums.UH_static)
-    buffer2 = core.ShaderBuffer("buffer2", num2, core.GeomEnums.UH_static)
+    num2 = pack('<ii', -1234567, 867451)
+    buffer1 = core.ShaderBuffer("buffer1", num1, core.GeomEnums.UH_dynamic)
+    buffer2 = core.ShaderBuffer("buffer2", num2, core.GeomEnums.UH_dynamic)
 
     preamble = """
     layout(std430, binding=0) buffer buffer1 {
@@ -306,11 +332,37 @@ def test_glsl_ssbo(gsg):
     };
     layout(std430, binding=1) buffer buffer2 {
         int value2;
+        int value3;
     };
     """
     code = """
     assert(value1 == 1234567);
     assert(value2 == -1234567);
+    assert(value3 == 867451);
+    value1 = 98765;
+    value2 = 5343525;
+    """
+    run_glsl_test(gsg, code, preamble, {'buffer1': buffer1, 'buffer2': buffer2},
+                  exts={'GL_ARB_shader_storage_buffer_object',
+                        'GL_ARB_uniform_buffer_object',
+                        'GL_ARB_shading_language_420pack'})
+
+    data1 = gsg.get_engine().extract_shader_buffer_data(buffer1, gsg)
+    assert unpack('<i', data1[:4]) == (98765, )
+
+    data2 = gsg.get_engine().extract_shader_buffer_data(buffer2, gsg)
+    assert unpack('<ii', data2[:8]) == (5343525, 867451)
+
+    data3 = gsg.get_engine().extract_shader_buffer_data(buffer2, gsg, 4, 8)
+    assert unpack('<i', data3[:4]) == (867451, )
+
+    gsg.get_engine().update_shader_buffer_data(buffer1, gsg, pack('<i', 92573))
+    gsg.get_engine().update_shader_buffer_data(buffer2, gsg, pack('<i', 64515), 4)
+
+    code = """
+    assert(value1 == 92573);
+    assert(value2 == 5343525);
+    assert(value3 == 64515);
     """
     run_glsl_test(gsg, code, preamble, {'buffer1': buffer1, 'buffer2': buffer2},
                   exts={'GL_ARB_shader_storage_buffer_object',
@@ -458,6 +510,26 @@ def test_glsl_pta_ivec4(gsg):
     run_glsl_test(gsg, code, preamble, {'pta': pta})
 
 
+def test_glsl_pta_mat3(gsg):
+    pta = core.PTA_LMatrix3f((
+        (0, 1, 2, 3, 4, 5, 6, 7, 8),
+        (9, 10, 11, 12, 13, 14, 15, 16, 17),
+    ))
+
+    preamble = """
+    uniform mat3 pta[2];
+    """
+    code = """
+    assert(pta[0][0] == vec3(0, 1, 2));
+    assert(pta[0][1] == vec3(3, 4, 5));
+    assert(pta[0][2] == vec3(6, 7, 8));
+    assert(pta[1][0] == vec3(9, 10, 11));
+    assert(pta[1][1] == vec3(12, 13, 14));
+    assert(pta[1][2] == vec3(15, 16, 17));
+    """
+    run_glsl_test(gsg, code, preamble, {'pta': pta})
+
+
 def test_glsl_pta_mat4(gsg):
     pta = core.PTA_LMatrix4f((
         (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
@@ -510,6 +582,250 @@ def test_glsl_param_ivec4(gsg):
     run_glsl_test(gsg, code, preamble, {'param': param})
 
 
+def test_glsl_named_light_source(gsg):
+    spot = core.Spotlight("spot")
+    spot.get_lens().set_fov(90, 90)
+    spot.set_color((1, 2, 3, 4))
+    spot.set_specular_color((5, 6, 7, 8))
+
+    preamble = """
+    struct p3d_LightSourceParameters {
+      vec4 color;
+      vec4 specular;
+    };
+    uniform p3d_LightSourceParameters spot;
+    """
+    code = """
+    assert(spot.color == vec4(1, 2, 3, 4));
+    assert(spot.specular == vec4(5, 6, 7, 8));
+    """
+    run_glsl_test(gsg, code, preamble, {'spot': core.NodePath(spot)})
+
+
+def test_glsl_state_light_source(gsg):
+    spot = core.Spotlight("spot")
+    spot.priority = 3
+    spot.get_lens().set_fov(120, 120)
+    spot.set_color((1, 2, 3, 4))
+    spot.set_specular_color((5, 6, 7, 8))
+    spot.attenuation = (23, 24, 25)
+    spot.exponent = 26
+
+    dire = core.DirectionalLight("dire")
+    dire.priority = 2
+    dire.set_color((9, 10, 11, 12))
+    dire.set_specular_color((13, 14, 15, 16))
+    dire.direction = (17, 18, 19)
+
+    preamble = """
+    struct p3d_LightSourceParameters {
+      vec4 color;
+      vec4 specular;
+      vec4 ambient;
+      vec4 diffuse;
+      vec4 position;
+      vec3 attenuation;
+      float constantAttenuation;
+      float linearAttenuation;
+      float quadraticAttenuation;
+      float spotExponent;
+      float spotCosCutoff;
+      float spotCutoff;
+      mat4 shadowViewMatrix;
+    };
+    uniform p3d_LightSourceParameters p3d_LightSource[3];
+    """
+    code = """
+    assert(p3d_LightSource[0].color == vec4(1, 2, 3, 4));
+    assert(p3d_LightSource[0].specular == vec4(5, 6, 7, 8));
+    assert(p3d_LightSource[0].ambient == vec4(0, 0, 0, 1));
+    assert(p3d_LightSource[0].diffuse == vec4(1, 2, 3, 4));
+    assert(p3d_LightSource[0].position == vec4(20, 21, 22, 1));
+    assert(p3d_LightSource[0].attenuation == vec3(23, 24, 25));
+    assert(p3d_LightSource[0].constantAttenuation == 23);
+    assert(p3d_LightSource[0].linearAttenuation == 24);
+    assert(p3d_LightSource[0].quadraticAttenuation == 25);
+    assert(p3d_LightSource[0].spotExponent == 26);
+    assert(p3d_LightSource[0].spotCosCutoff > 0.499);
+    assert(p3d_LightSource[0].spotCosCutoff < 0.501);
+    assert(p3d_LightSource[0].spotCutoff == 60);
+    assert(p3d_LightSource[0].shadowViewMatrix[0][0] > 0.2886);
+    assert(p3d_LightSource[0].shadowViewMatrix[0][0] < 0.2887);
+    assert(p3d_LightSource[0].shadowViewMatrix[0][1] == 0);
+    assert(p3d_LightSource[0].shadowViewMatrix[0][2] == 0);
+    assert(p3d_LightSource[0].shadowViewMatrix[0][3] == 0);
+    assert(p3d_LightSource[0].shadowViewMatrix[1][0] == 0);
+    assert(p3d_LightSource[0].shadowViewMatrix[1][1] > 0.2886);
+    assert(p3d_LightSource[0].shadowViewMatrix[1][1] < 0.2887);
+    assert(p3d_LightSource[0].shadowViewMatrix[1][2] == 0);
+    assert(p3d_LightSource[0].shadowViewMatrix[1][3] == 0);
+    assert(p3d_LightSource[0].shadowViewMatrix[2][0] < -0.4999);
+    assert(p3d_LightSource[0].shadowViewMatrix[2][0] > -0.5001);
+    assert(p3d_LightSource[0].shadowViewMatrix[2][1] < -0.4999);
+    assert(p3d_LightSource[0].shadowViewMatrix[2][1] > -0.5001);
+    assert(p3d_LightSource[0].shadowViewMatrix[2][2] < -0.9999);
+    assert(p3d_LightSource[0].shadowViewMatrix[2][3] < -0.9999);
+    assert(p3d_LightSource[0].shadowViewMatrix[3][0] > -16.2736);
+    assert(p3d_LightSource[0].shadowViewMatrix[3][0] < -16.2734);
+    assert(p3d_LightSource[0].shadowViewMatrix[3][1] > -16.8510);
+    assert(p3d_LightSource[0].shadowViewMatrix[3][1] < -16.8508);
+    assert(p3d_LightSource[0].shadowViewMatrix[3][2] > -22.0003);
+    assert(p3d_LightSource[0].shadowViewMatrix[3][2] < -22.0001);
+    assert(p3d_LightSource[0].shadowViewMatrix[3][3] > -21.0001);
+    assert(p3d_LightSource[0].shadowViewMatrix[3][3] < -20.9999);
+    assert(p3d_LightSource[1].color == vec4(9, 10, 11, 12));
+    assert(p3d_LightSource[1].specular == vec4(13, 14, 15, 16));
+    assert(p3d_LightSource[1].diffuse == vec4(9, 10, 11, 12));
+    assert(p3d_LightSource[1].ambient == vec4(0, 0, 0, 1));
+    assert(p3d_LightSource[1].position == vec4(-17, -18, -19, 0));
+    assert(p3d_LightSource[1].attenuation == vec3(1, 0, 0));
+    assert(p3d_LightSource[1].constantAttenuation == 1);
+    assert(p3d_LightSource[1].linearAttenuation == 0);
+    assert(p3d_LightSource[1].quadraticAttenuation == 0);
+    assert(p3d_LightSource[1].spotExponent == 0);
+    assert(p3d_LightSource[1].spotCosCutoff == -1);
+    assert(p3d_LightSource[2].color == vec4(0, 0, 0, 1));
+    assert(p3d_LightSource[2].specular == vec4(0, 0, 0, 1));
+    assert(p3d_LightSource[2].diffuse == vec4(0, 0, 0, 1));
+    assert(p3d_LightSource[2].ambient == vec4(0, 0, 0, 1));
+    assert(p3d_LightSource[2].position == vec4(0, 0, 1, 0));
+    assert(p3d_LightSource[2].attenuation == vec3(1, 0, 0));
+    assert(p3d_LightSource[2].constantAttenuation == 1);
+    assert(p3d_LightSource[2].linearAttenuation == 0);
+    assert(p3d_LightSource[2].quadraticAttenuation == 0);
+    assert(p3d_LightSource[2].spotExponent == 0);
+    assert(p3d_LightSource[2].spotCosCutoff == -1);
+    """
+
+    node = core.NodePath("state")
+    spot_path = node.attach_new_node(spot)
+    spot_path.set_pos(20, 21, 22)
+    node.set_light(spot_path)
+
+    dire_path = node.attach_new_node(dire)
+    node.set_light(dire_path)
+
+    run_glsl_test(gsg, code, preamble, state=node.get_state())
+
+
+def test_glsl_state_material(gsg):
+    mat = core.Material("mat")
+    mat.ambient = (1, 2, 3, 4)
+    mat.diffuse = (5, 6, 7, 8)
+    mat.emission = (9, 10, 11, 12)
+    mat.specular = (13, 14, 15, 0)
+    mat.shininess = 16
+    mat.metallic = 0.5
+    mat.refractive_index = 21
+
+    preamble = """
+    struct p3d_MaterialParameters {
+      vec4 ambient;
+      vec4 diffuse;
+      vec4 emission;
+      vec3 specular;
+      float shininess;
+      float metallic;
+      float refractiveIndex;
+    };
+    uniform p3d_MaterialParameters p3d_Material;
+    """
+    code = """
+    assert(p3d_Material.ambient == vec4(1, 2, 3, 4));
+    assert(p3d_Material.diffuse == vec4(5, 6, 7, 8));
+    assert(p3d_Material.emission == vec4(9, 10, 11, 12));
+    assert(p3d_Material.specular == vec3(13, 14, 15));
+    assert(p3d_Material.shininess == 16);
+    assert(p3d_Material.metallic == 0.5);
+    assert(p3d_Material.refractiveIndex == 21);
+    """
+
+    node = core.NodePath("state")
+    node.set_material(mat)
+
+    run_glsl_test(gsg, code, preamble, state=node.get_state())
+
+
+def test_glsl_state_material_pbr(gsg):
+    mat = core.Material("mat")
+    mat.base_color = (1, 2, 3, 4)
+    mat.emission = (9, 10, 11, 12)
+    mat.roughness = 16
+    mat.metallic = 0.5
+    mat.refractive_index = 21
+
+    preamble = """
+    struct p3d_MaterialParameters {
+      vec4 baseColor;
+      vec4 emission;
+      float metallic;
+      float refractiveIndex;
+      float roughness;
+    };
+    uniform p3d_MaterialParameters p3d_Material;
+    """
+    code = """
+    assert(p3d_Material.baseColor == vec4(1, 2, 3, 4));
+    assert(p3d_Material.emission == vec4(9, 10, 11, 12));
+    assert(p3d_Material.roughness == 16);
+    assert(p3d_Material.metallic == 0.5);
+    assert(p3d_Material.refractiveIndex == 21);
+    """
+
+    node = core.NodePath("state")
+    node.set_material(mat)
+
+    run_glsl_test(gsg, code, preamble, state=node.get_state())
+
+
+def test_glsl_state_fog(gsg):
+    fog = core.Fog("fog")
+    fog.color = (1, 2, 3, 4)
+    fog.exp_density = 0.5
+    fog.set_linear_range(6, 10)
+
+    preamble = """
+    struct p3d_FogParameters {
+      vec4 color;
+      float density;
+      float start;
+      float end;
+      float scale;
+    };
+    uniform p3d_FogParameters p3d_Fog;
+    """
+    code = """
+    assert(p3d_Fog.color == vec4(1, 2, 3, 4));
+    assert(p3d_Fog.density == 0.5);
+    assert(p3d_Fog.start == 6);
+    assert(p3d_Fog.end == 10);
+    assert(p3d_Fog.scale == 0.25);
+    """
+
+    node = core.NodePath("state")
+    node.set_fog(fog)
+
+    run_glsl_test(gsg, code, preamble, state=node.get_state())
+
+
+def test_glsl_frame_number(gsg):
+    clock = core.ClockObject.get_global_clock()
+    old_frame_count = clock.get_frame_count()
+    try:
+        clock.set_frame_count(123)
+
+        preamble = """
+        uniform int osg_FrameNumber;
+        """
+        code = """
+        assert(osg_FrameNumber == 123);
+        """
+
+        run_glsl_test(gsg, code, preamble)
+    finally:
+        clock.set_frame_count(old_frame_count)
+
+
 def test_glsl_write_extract_image_buffer(gsg):
     # Tests that we can write to a buffer texture on the GPU, and then extract
     # the data on the CPU.  We test two textures since there was in the past a
@@ -547,8 +863,9 @@ def test_glsl_write_extract_image_buffer(gsg):
     assert struct.unpack('i', tex2.get_ram_image()) == (-456,)
 
 
-def test_glsl_compile_error(gsg):
+def test_glsl_compile_error(glsl_gsg):
     """Test getting compile errors from bad shaders"""
+    gsg = glsl_gsg
     suffix = ''
     if (gsg.driver_shader_version_major, gsg.driver_shader_version_minor) < (1, 50):
         suffix = '_legacy'
@@ -557,8 +874,9 @@ def test_glsl_compile_error(gsg):
     run_glsl_compile_check(gsg, vert_path, frag_path, expect_fail=True)
 
 
-def test_glsl_from_file(gsg):
+def test_glsl_from_file(glsl_gsg):
     """Test compiling GLSL shaders from files"""
+    gsg = glsl_gsg
     suffix = ''
     if (gsg.driver_shader_version_major, gsg.driver_shader_version_minor) < (1, 50):
         suffix = '_legacy'
@@ -567,8 +885,9 @@ def test_glsl_from_file(gsg):
     run_glsl_compile_check(gsg, vert_path, frag_path)
 
 
-def test_glsl_includes(gsg):
+def test_glsl_includes(glsl_gsg):
     """Test preprocessing includes in GLSL shaders"""
+    gsg = glsl_gsg
     suffix = ''
     if (gsg.driver_shader_version_major, gsg.driver_shader_version_minor) < (1, 50):
         suffix = '_legacy'
@@ -595,8 +914,9 @@ def with_current_dir_on_model_path():
     model_path.clear_local_value()
 
 
-def test_glsl_includes_angle_withdir(gsg, with_current_dir_on_model_path):
+def test_glsl_includes_angle_withdir(glsl_gsg, with_current_dir_on_model_path):
     """Test preprocessing includes with angle includes with model-path"""
+    gsg = glsl_gsg
     suffix = ''
     if (gsg.driver_shader_version_major, gsg.driver_shader_version_minor) < (1, 50):
         suffix = '_legacy'

@@ -76,11 +76,11 @@ NodePath DNAWindows::traverse(NodePath &parent, DNAStorage *store, int editing) 
   float width = parent.get_parent().get_sx();
 
   // Position is set in the case statement. hpr and scale are computed here
-  LVector3f hpr;
+  LVector3 hpr;
   hpr.set(0.0, 0.0, rand_hpr_jitter);
 
   // Smaller walls get smaller windows
-  LVector3f scale;
+  LVector3 scale;
   if (width <= 5.0) {
     scale.fill(1.0 + rand_scale_jitter);
   } else if (width <= 10.0) {
@@ -99,7 +99,7 @@ NodePath DNAWindows::traverse(NodePath &parent, DNAStorage *store, int editing) 
 
     // Position the window
     window_node_path.set_scale(NodePath(), scale);
-    window_node_path.set_pos(LVector3f((0.5 + rand_pos_jitter),
+    window_node_path.set_pos(LVector3((0.5 + rand_pos_jitter),
                                        0.0,
                                        (0.5 + rand_pos_jitter)));
     window_node_path.set_hpr(hpr);
@@ -125,7 +125,7 @@ NodePath DNAWindows::traverse(NodePath &parent, DNAStorage *store, int editing) 
 
       // Position the window
       window_node_path.set_scale(NodePath(), scale);
-      window_node_path.set_pos(LVector3f(((i / (float)(_window_count+1)) + rand_pos_jitter),
+      window_node_path.set_pos(LVector3(((i / (float)(_window_count+1)) + rand_pos_jitter),
                                          0.0,
                                          (0.5 + rand_pos_jitter)));
       window_node_path.set_hpr(hpr);
@@ -146,11 +146,11 @@ NodePath DNAWindows::traverse(NodePath &parent, DNAStorage *store, int editing) 
       // Position the window
       window_node_path.set_scale(NodePath(), scale);
       if (i == 1) {
-        window_node_path.set_pos(LVector3f(0.33 + rand_pos_jitter, 0.0, 0.66 + rand_pos_jitter));
+        window_node_path.set_pos(LVector3(0.33 + rand_pos_jitter, 0.0, 0.66 + rand_pos_jitter));
       } else if (i == 2) {
-        window_node_path.set_pos(LVector3f(0.5 + rand_pos_jitter, 0.0, 0.33 + rand_pos_jitter));
+        window_node_path.set_pos(LVector3(0.5 + rand_pos_jitter, 0.0, 0.33 + rand_pos_jitter));
       } else if (i == 3) {
-        window_node_path.set_pos(LVector3f(0.66 + rand_pos_jitter, 0.0, 0.66 + rand_pos_jitter));
+        window_node_path.set_pos(LVector3(0.66 + rand_pos_jitter, 0.0, 0.66 + rand_pos_jitter));
       }
       window_node_path.set_hpr(hpr);
     }
@@ -169,13 +169,13 @@ NodePath DNAWindows::traverse(NodePath &parent, DNAStorage *store, int editing) 
       // Position the window
       window_node_path.set_scale(NodePath(), scale);
       if (i == 1) {
-        window_node_path.set_pos(LVector3f(0.33 + rand_pos_jitter, 0.0, 0.75 + rand_pos_jitter));
+        window_node_path.set_pos(LVector3(0.33 + rand_pos_jitter, 0.0, 0.75 + rand_pos_jitter));
       } else if (i == 2) {
-        window_node_path.set_pos(LVector3f(0.66 + rand_pos_jitter, 0.0, 0.75 + rand_pos_jitter));
+        window_node_path.set_pos(LVector3(0.66 + rand_pos_jitter, 0.0, 0.75 + rand_pos_jitter));
       } else if (i == 3) {
-        window_node_path.set_pos(LVector3f(0.33 + rand_pos_jitter, 0.0, 0.25 + rand_pos_jitter));
+        window_node_path.set_pos(LVector3(0.33 + rand_pos_jitter, 0.0, 0.25 + rand_pos_jitter));
       } else if (i == 4) {
-        window_node_path.set_pos(LVector3f(0.66 + rand_pos_jitter, 0.0, 0.25 + rand_pos_jitter));
+        window_node_path.set_pos(LVector3(0.66 + rand_pos_jitter, 0.0, 0.25 + rand_pos_jitter));
       }
 
       window_node_path.set_hpr(hpr);

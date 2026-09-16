@@ -305,11 +305,12 @@ int FrameBufferProperties::
 get_buffer_mask() const {
   int mask = 0;
 
-  if (_property[FBP_back_buffers] > 0) {
-    mask = RenderBuffer::T_front | RenderBuffer::T_back;
-  } else {
-    mask = RenderBuffer::T_front;
-  }
+  //XXX rdb: some buffers only have a front buffer, some only a back buffer
+  //if (_property[FBP_back_buffers] > 0) {
+     mask = RenderBuffer::T_front | RenderBuffer::T_back;
+  //} else {
+  //  mask = RenderBuffer::T_front;
+  //}
   if (_property[FBP_depth_bits] > 0) {
     mask |= RenderBuffer::T_depth;
   }
@@ -630,7 +631,7 @@ get_quality(const FrameBufferProperties &reqs) const {
  * false.
  */
 bool FrameBufferProperties::
-verify_hardware_software(const FrameBufferProperties &props, const std::string &renderer) const {
+verify_hardware_software(const FrameBufferProperties &props, std::string_view renderer) const {
 
   if (get_force_hardware() < props.get_force_hardware()) {
     display_cat.error()

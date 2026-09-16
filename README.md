@@ -20,6 +20,32 @@ resources. If you get stuck, ask for help from our active
 Panda3D is licensed under the Modified BSD License.  See the LICENSE file for
 more details.
 
+Installing Panda3D
+==================
+
+The latest Panda3D SDK can be downloaded from
+[this page](https://www.panda3d.org/download/sdk-1-10-16/).
+If you are familiar with installing Python packages, you can use
+the following command:
+
+```bash
+pip install panda3d
+```
+
+The easiest way to install the latest development build of Panda3D
+into an existing Python installation is using the following command:
+
+```bash
+pip install --pre --extra-index-url https://archive.panda3d.org/ panda3d
+```
+
+If this command fails, please make sure your version of pip is up-to-date.
+
+If you prefer to install the full SDK with all tools, the latest development
+builds can be obtained from [this page](https://www.panda3d.org/download.php?version=devel&sdk).
+
+These are automatically kept up-to-date with the latest GitHub version of Panda.
+
 Building Panda3D
 ================
 
@@ -30,7 +56,7 @@ Please ensure that you build Panda3D with Python 3.11.9.
 Windows
 -------
 
-You can build Panda3D with the Microsoft Visual C++ 2015, 2017, 2019 or 2022
+You can build Panda3D with the Microsoft Visual C++ 2017, 2019 or 2022
 compiler, which can be downloaded for free from the [Visual Studio site](https://visualstudio.microsoft.com/downloads/).
 You will also need to install the [Windows SDK](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk),
 and if you intend to target Windows Vista, you will also need the
@@ -42,8 +68,8 @@ depending on whether you are on a 32-bit or 64-bit system, or you can
 [click here](https://github.com/rdb/panda3d-thirdparty) for instructions on
 building them from source.
 
-- https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-win64.zip
-- https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-win32.zip
+- https://www.panda3d.org/download/panda3d-1.10.16/panda3d-1.10.16-tools-win64.zip
+- https://www.panda3d.org/download/panda3d-1.10.16/panda3d-1.10.16-tools-win32.zip
 
 After acquiring these dependencies, you can build Panda3D from the command
 prompt using the following command.  Change the `--msvc-version` option based
@@ -114,7 +140,7 @@ macOS
 -----
 
 On macOS, you will need to download a set of precompiled thirdparty packages in order to
-compile Panda3D, which can be acquired from [here](https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-mac.tar.gz).
+compile Panda3D, which can be acquired from [here](https://www.panda3d.org/download/panda3d-1.10.16/panda3d-1.10.16-tools-mac.tar.gz).
 
 After placing the thirdparty directory inside the panda3d source directory,
 you may build Panda3D using a command like the following:
@@ -123,15 +149,79 @@ you may build Panda3D using a command like the following:
 python makepanda/makepanda.py --everything --installer
 ```
 
-You may target a specific minimum macOS version using the --osxtarget flag
-followed by the release number, eg. 10.9 or 10.14.
-
 If the build was successful, makepanda will have generated a .dmg file in
 the source directory containing the installer.  Simply open it and run the
 package file in order to install the SDK onto your system.
 
 
 
+
+You will also need to choose which version of Python you want to use.
+Install the appropriate package for it (such as `python37` or `python38`) and
+run the makepanda script with your chosen Python version:
+
+```bash
+python3.11 makepanda/makepanda.py --everything --installer --no-egl --no-gles --no-gles2
+```
+
+If successful, this will produce a .pkg file in the root of the source
+directory which you can install using `pkg install`.
+
+Android
+-------
+
+Although it's possible to build Panda3D on an Android device using the
+[termux](https://termux.com/) shell, the recommended route is to cross-compile
+.whl files using the SDK and NDK, which can then be used by the `build_apps`
+command to build a Python application into an .apk or .aab bundle.  You will
+need to get the latest thirdparty packages, which can be obtained from here:
+
+https://rdb.name/thirdparty-android.tar.gz
+
+This includes a copy of Python 3.13 compiled for Android.  You will need to
+use Python 3.13 on the host as well.
+
+These commands show how to compile wheels for the supported Android ABIs:
+
+```bash
+export ANDROID_SDK_ROOT=/home/rdb/local/android
+python3.13 makepanda/makepanda.py --everything --outputdir built-droid-arm64 --arch arm64 --target android-21 --threads 6 --wheel
+python3.13 makepanda/makepanda.py --everything --outputdir built-droid-armv7a --arch arm --target android-21 --threads 6 --wheel
+python3.13 makepanda/makepanda.py --everything --outputdir built-droid-x86_64 --arch x86_64 --target android-21 --threads 6 --wheel
+python3.13 makepanda/makepanda.py --everything --outputdir built-droid-x86 --arch x86 --target android-21 --threads 6 --wheel
+```
+
+It is now possible to use the generated wheels with `build_apps`, as explained
+on this page:
+
+https://discourse.panda3d.org/t/deployment-for-android/28226
+
+Running Tests
+=============
+
+Install [PyTest](https://docs.pytest.org/en/latest/getting-started.html#installation)
+and run the `pytest` command.  If you have not installed Panda3D, you will
+need to configure your environment by pointing the `PYTHONPATH` variable at
+the `built` directory.  On Linux, you will also need to point the
+`LD_LIBRARY_PATH` variable at the `built/lib` directory.
+
+As a convenience, you can alternatively pass the `--tests` option to makepanda.
+
+Reporting Issues
+================
+
+If you encounter any bugs when using Panda3D, please report them in the bug
+tracker.  This is hosted at:
+
+  https://github.com/panda3d/panda3d/issues
+
+Make sure to first use the search function to see if the bug has already been
+reported.  When filling out a bug report, make sure that you include as much
+information as possible to help the developers track down the issue, such as
+your version of Panda3D, operating system, architecture, and any code and
+models that are necessary for the developers to reproduce the issue.
+
+If you're unsure whether you've encountered a bug, feel free to ask in the [forums](https://discourse.panda3d.org) or the [IRC channel](https://web.libera.chat/#panda3d) before opening an issue.
 
 
 Supporting the Project
@@ -141,9 +231,12 @@ If you would like to support the project financially, visit
 [our campaign on OpenCollective](https://opencollective.com/panda3d).  Your
 contributions help us accelerate the development of Panda3D.
 
-For the list of backers, see the [BACKERS.md](BACKERS.md) file or visit the
-[Sponsors page](https://www.panda3d.org/sponsors) on our web site.  Thank you
-to everyone who has donated!
+For the complete list of backers, see the [BACKERS.md](BACKERS.md) file or
+visit the [Sponsors page](https://www.panda3d.org/sponsors) on our web site.
+Thank you to everyone who has donated!
+
+[<img src="https://www.panda3d.org/wp-content/uploads/2024/08/Route4MeLogo1185x300-2-1-1024x259.png" alt="Route4Me" height="48">](https://route4me.com/)
+[<img src="https://www.panda3d.org/wp-content/uploads/2026/01/black-logo-1-e1768931551108.png" alt="TestMu AI" height="48">](https://www.testmu.ai/?utm_source=panda3d&utm_medium=sponsor)
 
 <a href="https://opencollective.com/panda3d" target="_blank">
   <img src="https://opencollective.com/panda3d/contribute/button@2x.png?color=blue" width=300 />

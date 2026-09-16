@@ -28,15 +28,15 @@ PUBLISHED:
   void set_code(std::string code);
   std::string get_code() const;
 
-  void set_color(const LColorf &color);
-  LColorf get_color() const;
+  void set_color(const LColor &color);
+  LColor get_color() const;
 
 private:
   virtual DNAGroup* make_copy();
 
 private:
   std::string _code;
-  LColorf _color;
+  LColor _color;
 
 public:
   static TypeHandle get_class_type() {

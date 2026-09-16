@@ -47,8 +47,12 @@ def depth_region(request, graphics_pipe):
     if buffer is None:
         pytest.skip("Cannot make depth buffer")
 
-    if buffer.get_fb_properties().depth_bits != request.param:
-        pytest.skip("Could not make buffer with desired bit count")
+    got_depth_bits = buffer.get_fb_properties().depth_bits
+    if got_depth_bits < 24 and request.param == 16:
+        # We'll accept this - tinydisplay exclusively supports 20-bit depth.
+        pass
+    elif got_depth_bits != request.param:
+        pytest.skip("Could not make buffer with desired depth bit count")
 
     yield buffer.make_display_region()
 
@@ -198,12 +202,12 @@ def test_depth_bias(depth_region):
     # With slope-scaled depth bias (our quad has no slope)
     state = core.RenderState.make(core.DepthBiasAttrib.make(10, 0))
     z = render_depth_pixel(depth_region, 5, near=1, far=10, state=state)
-    assert z == z_ref
+    assert z == pytest.approx(z_ref)
 
     # Same, but negative
     state = core.RenderState.make(core.DepthBiasAttrib.make(-10, 0))
     z = render_depth_pixel(depth_region, 5, near=1, far=10, state=state)
-    assert z == z_ref
+    assert z == pytest.approx(z_ref)
 
 
 def test_depth_offset(depth_region):

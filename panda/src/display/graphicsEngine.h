@@ -32,6 +32,10 @@
 #include "indirectLess.h"
 #include "loader.h"
 #include "referenceCount.h"
+#include "renderState.h"
+#include "clockObject.h"
+
+#include <type_traits>
 
 class Pipeline;
 class DisplayRegion;
@@ -52,7 +56,8 @@ class Texture;
  */
 class EXPCL_PANDA_DISPLAY GraphicsEngine : public ReferenceCount {
 PUBLISHED:
-  explicit GraphicsEngine(Pipeline *pipeline = nullptr);
+  explicit GraphicsEngine(ClockObject *clock = ClockObject::get_global_clock(),
+                          Pipeline *pipeline = nullptr);
   BLOCKING ~GraphicsEngine();
 
   void set_threading_model(const GraphicsThreadingModel &threading_model);
@@ -75,7 +80,7 @@ PUBLISHED:
   MAKE_PROPERTY(default_loader, get_default_loader, set_default_loader);
 
   GraphicsOutput *make_output(GraphicsPipe *pipe,
-                              const std::string &name, int sort,
+                              std::string_view name, int sort,
                               const FrameBufferProperties &fb_prop,
                               const WindowProperties &win_prop,
                               int flags, GraphicsStateGuardian *gsg = nullptr,
@@ -83,13 +88,13 @@ PUBLISHED:
 
   // Syntactic shorthand versions of make_output
   INLINE GraphicsOutput *make_buffer(GraphicsOutput *host,
-                                     const std::string &name, int sort,
+                                     std::string_view name, int sort,
                                      int x_size, int y_size);
   INLINE GraphicsOutput *make_buffer(GraphicsStateGuardian *gsg,
-                                     const std::string &name, int sort,
+                                     std::string_view name, int sort,
                                      int x_size, int y_size);
   INLINE GraphicsOutput *make_parasite(GraphicsOutput *host,
-                                       const std::string &name, int sort,
+                                       std::string_view name, int sort,
                                        int x_size, int y_size);
 
   bool add_window(GraphicsOutput *window, int sort);
@@ -110,9 +115,17 @@ PUBLISHED:
   BLOCKING void flip_frame();
 
   bool extract_texture_data(Texture *tex, GraphicsStateGuardian *gsg);
+  vector_uchar extract_shader_buffer_data(ShaderBuffer *buffer, GraphicsStateGuardian *gsg,
+                                          size_t start = 0, size_t size = (size_t)-1);
+  bool update_shader_buffer_data(ShaderBuffer *buffer, GraphicsStateGuardian *gsg,
+                                 const vector_uchar &data, size_t offset = 0);
+
   void dispatch_compute(const LVecBase3i &work_groups,
-                        const ShaderAttrib *sattr,
+                        const RenderState *state,
                         GraphicsStateGuardian *gsg);
+  INLINE void dispatch_compute(const LVecBase3i &work_groups,
+                               const ShaderAttrib *sattr,
+                               GraphicsStateGuardian *gsg);
 
   static GraphicsEngine *get_global_ptr();
 
@@ -123,15 +136,17 @@ public:
     TS_do_flip,
     TS_do_release,
     TS_do_windows,
-    TS_do_compute,
-    TS_do_extract,
-    TS_do_screenshot,
+    TS_callback,
     TS_terminate,
     TS_done
   };
 
   void texture_uploaded(Texture *tex);
-  PT(Texture) do_get_screenshot(DisplayRegion *region, GraphicsStateGuardian *gsg);
+
+#ifndef CPPPARSER
+  template<class Callable>
+  INLINE auto run_on_draw_thread(Callable &&callable) -> decltype(callable());
+#endif
 
 public:
   static void do_cull(CullHandler *cull_handler, SceneSetup *scene_setup,
@@ -173,6 +188,7 @@ private:
   void do_add_window(GraphicsOutput *window);
   void do_add_gsg(GraphicsStateGuardian *gsg, GraphicsPipe *pipe);
   void do_remove_window(GraphicsOutput *window, Thread *current_thread);
+  void do_reassign_windows(Thread *current_thread);
   void do_resort_windows();
   void terminate_threads(Thread *current_thread);
   void auto_adjust_capabilities(GraphicsStateGuardian *gsg);
@@ -264,7 +280,7 @@ private:
 
   class WindowRenderer {
   public:
-    WindowRenderer(const std::string &name);
+    WindowRenderer(std::string_view name);
 
     void add_gsg(GraphicsStateGuardian *gsg);
     void add_window(Windows &wlist, GraphicsOutput *window);
@@ -295,8 +311,18 @@ private:
 
   class RenderThread : public Thread, public WindowRenderer {
   public:
-    RenderThread(const std::string &name, GraphicsEngine *engine);
+    RenderThread(std::string_view name, GraphicsEngine *engine);
     virtual void thread_main();
+
+    typedef void Callback(RenderThread *thread);
+    void run_on_thread(Callback *callback,
+                       void *callback_data = nullptr,
+                       void *return_data = nullptr);
+
+#ifndef CPPPARSER
+    template<class Callable>
+    INLINE auto run_on_thread(Callable &&callable) -> decltype(callable());
+#endif
 
     GraphicsEngine *_engine;
     Mutex _cv_mutex;
@@ -304,18 +330,16 @@ private:
     ConditionVar _cv_done;
     ThreadState _thread_state;
 
-    // These are stored for extract_texture_data and dispatch_compute.
-    GraphicsStateGuardian *_gsg;
-    PT(Texture) _texture;
-    const RenderState *_state;
-    DisplayRegion *_region;
-    LVecBase3i _work_groups;
-    bool _result;
+    // Used for TS_callback.
+    Callback *_callback;
+    void *_callback_data;
+    void *_return_data;
   };
 
-  WindowRenderer *get_window_renderer(const std::string &name, int pipeline_stage);
+  WindowRenderer *get_window_renderer(std::string_view name, int pipeline_stage);
 
   Pipeline *_pipeline;
+  ClockObject *const _clock;
   Windows _windows;
   bool _windows_sorted;
 
@@ -326,9 +350,10 @@ private:
   NewWindows _new_windows;
 
   WindowRenderer _app;
-  typedef pmap<std::string, PT(RenderThread) > Threads;
+  typedef pmap<std::string, PT(RenderThread), std::less<> > Threads;
   Threads _threads;
   GraphicsThreadingModel _threading_model;
+  bool _threading_model_changed;
   bool _auto_flip;
   bool _portal_enabled; //toggle to portal culling on/off
   PT(Loader) _default_loader;

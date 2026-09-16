@@ -35,7 +35,7 @@ SuitLeg(Type type, double start_time, double leg_time, int zone_id,
 //               indicated time, in seconds elapsed since the start of
 //               this leg.
 ////////////////////////////////////////////////////////////////////
-LPoint3f SuitLeg::
+LPoint3 SuitLeg::
 get_pos_at_time(double time) const {
   switch (_type) {
   case T_walk_from_street:

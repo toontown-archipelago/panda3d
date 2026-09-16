@@ -30,20 +30,23 @@ TypeHandle TinySDLGraphicsWindow::_type_handle;
  */
 TinySDLGraphicsWindow::
 TinySDLGraphicsWindow(GraphicsEngine *engine, GraphicsPipe *pipe,
-                      const std::string &name,
+                      std::string name,
                       const FrameBufferProperties &fb_prop,
                       const WindowProperties &win_prop,
                       int flags,
                       GraphicsStateGuardian *gsg,
                       GraphicsOutput *host) :
-  GraphicsWindow(engine, pipe, name, fb_prop, win_prop, flags, gsg, host)
+  GraphicsWindow(engine, pipe, std::move(name), fb_prop, win_prop, flags, gsg, host)
 {
   _screen = nullptr;
   _frame_buffer = nullptr;
   _pitch = 0;
   update_pixel_factor();
 
-  add_input_device(GraphicsWindowInputDevice::pointer_and_keyboard(this, "keyboard_mouse"));
+  PT(GraphicsWindowInputDevice) device =
+    GraphicsWindowInputDevice::pointer_and_keyboard(this, "keyboard_mouse");
+  add_input_device(device);
+  _input = device.p();
 }
 
 /**
@@ -166,35 +169,35 @@ process_events() {
     switch(evt.type) {
     case SDL_KEYDOWN:
       if (evt.key.keysym.unicode) {
-        _input_devices[0]->keystroke(evt.key.keysym.unicode);
+        _input->keystroke(evt.key.keysym.unicode);
       }
       button = get_keyboard_button(evt.key.keysym.sym);
       if (button != ButtonHandle::none()) {
-        _input_devices[0]->button_down(button);
+        _input->button_down(button);
       }
       break;
 
     case SDL_KEYUP:
       button = get_keyboard_button(evt.key.keysym.sym);
       if (button != ButtonHandle::none()) {
-        _input_devices[0]->button_up(button);
+        _input->button_up(button);
       }
       break;
 
     case SDL_MOUSEBUTTONDOWN:
       button = get_mouse_button(evt.button.button);
-      _input_devices[0]->set_pointer_in_window(evt.button.x, evt.button.y);
-      _input_devices[0]->button_down(button);
+      _input->set_pointer_in_window(evt.button.x, evt.button.y);
+      _input->button_down(button);
       break;
 
     case SDL_MOUSEBUTTONUP:
       button = get_mouse_button(evt.button.button);
-      _input_devices[0]->set_pointer_in_window(evt.button.x, evt.button.y);
-      _input_devices[0]->button_up(button);
+      _input->set_pointer_in_window(evt.button.x, evt.button.y);
+      _input->button_up(button);
       break;
 
     case SDL_MOUSEMOTION:
-      _input_devices[0]->set_pointer_in_window(evt.motion.x, evt.motion.y);
+      _input->set_pointer_in_window(evt.motion.x, evt.motion.y);
       break;
 
     case SDL_VIDEORESIZE:

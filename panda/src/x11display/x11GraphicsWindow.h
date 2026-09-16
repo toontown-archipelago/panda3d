@@ -26,7 +26,7 @@
 class x11GraphicsWindow : public GraphicsWindow {
 public:
   x11GraphicsWindow(GraphicsEngine *engine, GraphicsPipe *pipe,
-                    const std::string &name,
+                    std::string name,
                     const FrameBufferProperties &fb_prop,
                     const WindowProperties &win_prop,
                     int flags,
@@ -45,6 +45,8 @@ public:
   virtual void set_properties_now(WindowProperties &properties);
 
   INLINE X11_Window get_xwindow() const;
+
+  void enable_detectable_auto_repeat();
 
 protected:
   virtual void close_window();

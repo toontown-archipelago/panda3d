@@ -41,8 +41,8 @@ public:
   std::string _string;
   StringVector _string_vector;
   PTA_double _number_list;
-  LVecBase3f _v3;
-  LColorf _color;
+  LVecBase3 _v3;
+  LColor _color;
   bool _bool;
   PT(DNAGroup) _dna_group;
   DNASuitPoint::DNASuitPointType _suit_point_type;

@@ -16,7 +16,7 @@ TypeHandle DNABattleCell::_type_handle;
 //       Access: Public
 //  Description:
 ////////////////////////////////////////////////////////////////////
-DNABattleCell::DNABattleCell(float width, float height, LPoint3f pos) {
+DNABattleCell::DNABattleCell(float width, float height, LPoint3 pos) {
   _width = width;
   _height = height;
   _pos = pos;

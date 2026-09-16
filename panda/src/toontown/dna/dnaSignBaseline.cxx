@@ -80,8 +80,8 @@ DNASignBaseline::DNASignBaseline(const DNASignBaseline &signBaseline) :
 //  Description:
 ////////////////////////////////////////////////////////////////////
 void DNASignBaseline::baseline_next_pos_hpr_scale(
-    LVector3f &pos, LVector3f &hpr, LVector3f &scale,
-    const LVector3f &size) {
+    LVector3 &pos, LVector3 &hpr, LVector3 &scale,
+    const LVector3 &size) {
   if (_width!=0.0 || _height!=0.0) {
     circle_next_pos_hpr_scale(pos, hpr, scale, size);
   } else {
@@ -167,8 +167,8 @@ NodePath DNASignBaseline::traverse(NodePath &parent, DNAStorage *store, int edit
   }
 
   // Center the text and graphics:
-  LVector3f pos = _pos;
-  LVector3f hpr = _hpr;
+  LVector3 pos = _pos;
+  LVector3 hpr = _hpr;
   center(pos, hpr);
 
   signBaseline_node_path.set_depth_write(false);
@@ -177,7 +177,7 @@ NodePath DNASignBaseline::traverse(NodePath &parent, DNAStorage *store, int edit
   signBaseline_node_path.set_pos_hpr_scale(parent,
            pos,
            hpr,
-           LVector3f(1.0));
+           LVector3(1.0));
 
   if (editing) {
     // Remember that this nodepath is associated with this dna group
@@ -209,17 +209,17 @@ void DNASignBaseline::write(std::ostream &out,
       indent(out, indent_level + 1) << "code [ " <<
         '"' << _code << '"' << " ]\n";
   }
-  if (!_color.almost_equal(LVecBase4f(1.0, 1.0, 1.0, 1.0))) {
+  if (!_color.almost_equal(LVecBase4(1.0, 1.0, 1.0, 1.0))) {
       indent(out, indent_level + 1) << "color [ " <<
         _color[0] << " " << _color[1] << " " <<
         _color[2] << " " << _color[3] << " ]\n";
   }
-  if (!_pos.almost_equal(LVecBase3f::zero())) {
+  if (!_pos.almost_equal(LVecBase3::zero())) {
     indent(out, indent_level + 1) << "pos [ " <<
       _pos[0] << " " << _pos[1] << " " <<
       _pos[2] << " ]\n";
   }
-  if ((!_hpr.almost_equal(LVecBase3f::zero()))) {
+  if ((!_hpr.almost_equal(LVecBase3::zero()))) {
     if (temp_hpr_fix) {
       indent(out, indent_level + 1) << "nhpr [ " <<
         _hpr[0] << " " << _hpr[1] << " " << _hpr[2] << " ]\n";
@@ -228,7 +228,7 @@ void DNASignBaseline::write(std::ostream &out,
         _hpr[0] << " " << _hpr[1] << " " << _hpr[2] << " ]\n";
     }
   }
-  if (!_scale.almost_equal(LVecBase3f(1.0, 1.0, 1.0))) {
+  if (!_scale.almost_equal(LVecBase3(1.0, 1.0, 1.0))) {
     indent(out, indent_level + 1) << "scale [ " <<
       _scale[0] << " " << _scale[1] << " " <<
       _scale[2] << " ]\n";
@@ -283,7 +283,7 @@ void DNASignBaseline::write(std::ostream &out,
 //       Access: Public
 //  Description:
 ////////////////////////////////////////////////////////////////////
-void DNASignBaseline::center(LVector3f &pos, LVector3f &hpr) {
+void DNASignBaseline::center(LVector3 &pos, LVector3 &hpr) {
   const float pi = 3.141592653589793;
   const float quarter_circle = pi*0.5;
   const float degrees_to_radians = pi/180.0;
@@ -338,8 +338,8 @@ void DNASignBaseline::center(LVector3f &pos, LVector3f &hpr) {
 //  Description:
 ////////////////////////////////////////////////////////////////////
 void DNASignBaseline::line_next_pos_hpr_scale(
-    LVector3f &pos, LVector3f &hpr, LVector3f &scale,
-    const LVector3f &size) {
+    LVector3 &pos, LVector3 &hpr, LVector3 &scale,
+    const LVector3 &size) {
   scale[0] *= _scale[0];
   scale[1] *= _scale[1];
   scale[2] *= _scale[2];
@@ -367,8 +367,8 @@ void DNASignBaseline::line_next_pos_hpr_scale(
 //  Description:
 ////////////////////////////////////////////////////////////////////
 void DNASignBaseline::circle_next_pos_hpr_scale(
-    LVector3f &pos, LVector3f &hpr, LVector3f &scale,
-    const LVector3f &size) {
+    LVector3 &pos, LVector3 &hpr, LVector3 &scale,
+    const LVector3 &size) {
   nassertv(!cnan(_cursor));
   const float pi = 3.141592653589793;
   const float quarter_circle = pi*0.5;

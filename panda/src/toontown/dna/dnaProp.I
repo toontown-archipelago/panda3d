@@ -9,7 +9,7 @@
 //       Access: Public
 //  Description:
 ////////////////////////////////////////////////////////////////////
-INLINE void DNAProp::set_color(const LColorf &color) {
+INLINE void DNAProp::set_color(const LColor &color) {
   _color = color;
 }
 
@@ -19,7 +19,7 @@ INLINE void DNAProp::set_color(const LColorf &color) {
 //       Access: Public
 //  Description:
 ////////////////////////////////////////////////////////////////////
-INLINE LColorf DNAProp::get_color() const {
+INLINE LColor DNAProp::get_color() const {
   return _color;
 }
 

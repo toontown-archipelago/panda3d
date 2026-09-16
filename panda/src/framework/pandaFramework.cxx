@@ -204,6 +204,8 @@ close_framework() {
 
   _event_handler.remove_all_hooks();
 
+  _task_mgr.cleanup();
+
   _is_open = false;
   _made_default_pipe = false;
   _default_pipe.clear();
@@ -297,7 +299,7 @@ remove_mouse(const GraphicsOutput *window) {
  * description of the function of the key, for display to the user.
  */
 void PandaFramework::
-define_key(const string &event_name, const string &description,
+define_key(std::string_view event_name, std::string description,
            EventHandler::EventCallbackFunction *function,
            void *data) {
   if (_event_handler.has_hook(event_name)) {
@@ -320,8 +322,8 @@ define_key(const string &event_name, const string &description,
   if (!description.empty()) {
     KeyDefinition keydef;
     keydef._event_name = event_name;
-    keydef._description = description;
-    _key_definitions.push_back(keydef);
+    keydef._description = std::move(description);
+    _key_definitions.push_back(std::move(keydef));
   }
 }
 
@@ -331,7 +333,7 @@ define_key(const string &event_name, const string &description,
  * description of the function of the key, for display to the user.
  */
 void PandaFramework::
-define_key(const string &event_name, const string &description,
+define_key(std::string_view event_name, std::string description,
            EventHandler::EventLambda function) {
   if (_event_handler.has_hook(event_name)) {
     // If there is already a hook for the indicated keyname, we're most likely
@@ -353,8 +355,8 @@ define_key(const string &event_name, const string &description,
   if (!description.empty()) {
     KeyDefinition keydef;
     keydef._event_name = event_name;
-    keydef._description = description;
-    _key_definitions.push_back(keydef);
+    keydef._description = std::move(description);
+    _key_definitions.push_back(std::move(keydef));
   }
 }
 

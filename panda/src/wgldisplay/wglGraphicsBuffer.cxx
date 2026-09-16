@@ -28,13 +28,13 @@ TypeHandle wglGraphicsBuffer::_type_handle;
  */
 wglGraphicsBuffer::
 wglGraphicsBuffer(GraphicsEngine *engine, GraphicsPipe *pipe,
-                  const std::string &name,
+                  std::string name,
                   const FrameBufferProperties &fb_prop,
                   const WindowProperties &win_prop,
                   int flags,
                   GraphicsStateGuardian *gsg,
                   GraphicsOutput *host) :
-  GraphicsBuffer(engine, pipe, name, fb_prop, win_prop, flags, gsg, host)
+  GraphicsBuffer(engine, pipe, std::move(name), fb_prop, win_prop, flags, gsg, host)
 {
   _pbuffer = (HPBUFFERARB)0;
   _pbuffer_dc = (HDC)0;
@@ -301,9 +301,10 @@ open_buffer() {
     // If the old gsg has the wrong pixel format, create a new one that shares
     // with the old gsg.
     DCAST_INTO_R(wglgsg, _gsg, false);
-    if ((!wglgsg->get_fb_properties().subsumes(_fb_properties))||
-        (!wglgsg->get_fb_properties().is_single_buffered())||
-        (!wglgsg->pfnum_supports_pbuffer())) {
+    if (wglgsg->get_engine() != _engine ||
+        !wglgsg->get_fb_properties().subsumes(_fb_properties) ||
+        !wglgsg->get_fb_properties().is_single_buffered() ||
+        !wglgsg->pfnum_supports_pbuffer()) {
       wglgsg = new wglGraphicsStateGuardian(_engine, _pipe, wglgsg);
       wglgsg->choose_pixel_format(_fb_properties, true);
       _gsg = wglgsg;
