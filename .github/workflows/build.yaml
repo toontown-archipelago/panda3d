@@ -4,53 +4,110 @@ on:
     types: [published]
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022  # Pin to 2022 for MSVC 14.3 compatibility
     permissions:
-      contents: write  # Needed for release upload
-    steps:
-      - name: "Checkout files"
-        uses: actions/checkout@v4
-
-      - name: Download Thirdparty
-        shell: powershell
-        run: |
-          $wc = New-Object System.Net.WebClient
-          $wc.DownloadFile("https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-win64.zip", "thirdparty-tools.zip")
-          Add-Type -Assembly "System.IO.Compression.Filesystem"
-          [System.IO.Compression.ZipFile]::ExtractToDirectory("thirdparty-tools.zip", "thirdparty-tools")
-          Move-Item -Path thirdparty-tools/panda3d-1.10.14/thirdparty -Destination .
-
-      - name: Build Panda
-        shell: powershell
-        run: |        
-          .\thirdparty\win-python3.11-x64\python.exe makepanda\makepanda.py `
-            --installer `
-            --wheel `
-            --optimize 3 `
-            --lzma `
-            --threads=4 `
-            --archipelago `
-            --msvc-version=14.3 `
-            --windows-sdk=10
-
-      - name: Upload Panda Binaries
-        shell: powershell
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload ${{ github.ref_name }} Panda3D-1.11.0-py3.11-x64.exe
-          gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-win_amd64.whl
-
-  build-linux:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write  # Needed for release upload
+      contents: write # Needed for release upload
     steps:
       - name: Checkout files
         uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache dependencies (Windows)
+        uses: actions/cache@v4
+        with:
+          path: thirdparty
+          key: win-thirdparty-v1.10.16
+
+      - name: Download Thirdparty
+        shell: bash
+        run: |
+          if [ ! -d thirdparty/win-libs-vc14-x64 ]; then
+            curl --retry 5 --retry-delay 10 -fLo thirdparty-tools.zip "https://www.panda3d.org/download/panda3d-1.10.16/panda3d-1.10.16-tools-win64.zip"
+            unzip -q thirdparty-tools.zip -d thirdparty-tools
+            mv thirdparty-tools/panda3d-1.10.16/thirdparty .
+          fi
+
+      - name: Build Panda
+        shell: bash
+        run: |
+          python makepanda/makepanda.py \
+            --installer \
+            --wheel \
+            --optimize 3 \
+            --lzma \
+            --threads=4 \
+            --archipelago \
+            --msvc-version=14.3 \
+            --windows-sdk=10 \
+            --python-incdir="$pythonLocation/include" \
+            --python-libdir="$pythonLocation/lib"
+
+      - name: Upload Binaries
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} Panda3D-*.exe panda3d-*.whl
+
+  build-macos:
+    runs-on: macos-14
+    permissions:
+      contents: write # Needed for release upload
+    steps:
+      - name: Checkout files
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          brew install assimp eigen harfbuzz jpeg libpng ode openssl pkg-config libsquish
+          curl -O https://www.panda3d.org/download/panda3d-1.10.16/panda3d-1.10.16-tools-mac.tar.gz
+          tar -xf panda3d-1.10.16-tools-mac.tar.gz
+          mv panda3d-1.10.16/thirdparty thirdparty
+          rmdir panda3d-1.10.16
+          (cd thirdparty/darwin-libs-a && rm -rf rocket openexr)
+
+      - name: Set up Xcode
+        run: |
+          # Matches Panda3D's CI approach to active developer toolchain
+          sudo xcode-select -switch /Applications/Xcode.app/Contents/Developer
+          xcrun --show-sdk-path
+
+      - name: Build Panda
+        run: |
+          python makepanda/makepanda.py \
+            --wheel \
+            --optimize 3 \
+            --lzma \
+            --threads=4 \
+            --archipelago \
+            --python-incdir="$pythonLocation/include" \
+            --python-libdir="$pythonLocation/lib"
+
+      - name: Upload Binaries
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} panda3d-*.whl
+
+  build-linux:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed for release upload
+    steps:
+      - name: Checkout files
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -82,59 +139,8 @@ jobs:
             --python-incdir="$pythonLocation/include" \
             --python-libdir="$pythonLocation/lib"
 
-      - name: Upload Panda Binary
+      - name: Upload Binaries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-linux_x86_64.whl
-  build-macos:
-    runs-on: macos-latest
-    permissions:
-      contents: write  # Needed for release upload
-    steps:
-      - name: Checkout files
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install Dependencies
-        run: |
-          brew install assimp eigen harfbuzz jpeg libpng ode openssl pkg-config libsquish wget
-          # download thirdparty packages from https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-mac.tar.gz
-          # then copy the extracted thirdparty folder to root dir
-          wget https://www.panda3d.org/download/panda3d-1.10.14/panda3d-1.10.14-tools-mac.tar.gz
-          tar -xvf panda3d-1.10.14-tools-mac.tar.gz 
-          mv panda3d-1.10.14/thirdparty .
-
-      - name: Build Panda
-        run: |
-          python makepanda/makepanda.py \
-            --wheel \
-            --threads=4 \
-            --archipelago \
-            --python-incdir="$pythonLocation/include" \
-            --python-libdir="$pythonLocation/lib"
-            
-          arch -x86_64 python makepanda/makepanda.py \
-            --wheel \
-            --threads=4 \
-            --archipelago \
-
-          # universal
-          python makepanda/makepanda.py \
-            --wheel \
-            --threads=4 \
-            --archipelago \
-            --universal
-
-
-      - name: Upload Panda Binary
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-macosx_11_0_arm64.whl
-          gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-macosx_10_9_x86_64.whl
-          gh release upload ${{ github.ref_name }} panda3d-1.11.0-cp311-cp311-macosx_10_9_universal2.whl
+          gh release upload ${{ github.ref_name }} panda3d-*.whl
