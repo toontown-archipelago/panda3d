@@ -14,6 +14,10 @@ if(HAVE_DX9)
   set(AUX_DISPLAYS "${AUX_DISPLAYS}\naux-display pandadx9")
 endif()
 
+if(HAVE_METAL)
+  set(AUX_DISPLAYS "${AUX_DISPLAYS}\naux-display p3metaldisplay")
+endif()
+
 if(HAVE_TINYDISPLAY)
   set(AUX_DISPLAYS "${AUX_DISPLAYS}\naux-display p3tinydisplay")
 endif()

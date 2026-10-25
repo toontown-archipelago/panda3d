@@ -176,6 +176,7 @@ get_num_members() const {
  */
 INLINE const ShaderType::Struct::Member &ShaderType::Struct::
 get_member(size_t i) const {
+  assert(i < _members.size());
   return _members[i];
 }
 

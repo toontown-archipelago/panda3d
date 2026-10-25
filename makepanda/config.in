@@ -16,6 +16,7 @@ load-display pandagl
 #load-display pandadx9
 #load-display pandagles
 #load-display pandagles2
+#load-display p3metaldisplay
 #load-display p3tinydisplay
 
 # These control the placement and size of the default rendering window.

@@ -232,6 +232,10 @@ end_traverse() {
     }
   }
   _pending_objects.clear();
+
+  // Hand the traversal back to the real cull handler.  We are our own cull
+  // handler during the traversal, so we would otherwise end up recursing.
+  set_cull_handler(_true_cull_handler);
   CullTraverser::end_traverse();
 
   gsg->end_scene();

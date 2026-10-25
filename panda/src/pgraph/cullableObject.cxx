@@ -39,6 +39,7 @@ PStatCollector CullableObject::_munge_geom_pcollector("*:Munge:Geom");
 PStatCollector CullableObject::_munge_sprites_pcollector("*:Munge:Sprites");
 PStatCollector CullableObject::_munge_sprites_verts_pcollector("*:Munge:Sprites:Verts");
 PStatCollector CullableObject::_munge_sprites_prims_pcollector("*:Munge:Sprites:Prims");
+PStatCollector CullableObject::_munge_lines_pcollector("*:Munge:Lines");
 PStatCollector CullableObject::_munge_instances_pcollector("*:Munge:Instances");
 PStatCollector CullableObject::_sw_sprites_pcollector("SW Sprites");
 
@@ -109,7 +110,11 @@ munge_geom(GraphicsStateGuardianBase *gsg, GeomMunger *munger,
           }
         }
       }
-      if (unsupported_bits & Geom::GR_render_mode_wireframe) {
+      // Thick wireframe is drawn as lines, which are expanded into quads below
+      // if the GSG can't draw thick lines.
+      if ((unsupported_bits & Geom::GR_render_mode_wireframe) != 0 ||
+          ((geom_rendering & Geom::GR_render_mode_wireframe) != 0 &&
+           (unsupported_bits & Geom::GR_line_thickness) != 0)) {
         if (geom_reader.get_primitive_type() != Geom::PT_lines) {
           _geom = _geom->make_lines();
         }
@@ -128,6 +133,14 @@ munge_geom(GraphicsStateGuardianBase *gsg, GeomMunger *munger,
           << (unsupported_bits & Geom::GR_point_bits) << std::dec << "\n";
       }
       if (!munge_points_to_quads(traverser, force)) {
+        return false;
+      }
+    }
+
+    if ((unsupported_bits & Geom::GR_line_thickness) != 0 &&
+        _geom->get_primitive_type() == Geom::PT_lines) {
+      // The GSG can't draw lines this thick; draw them as quads instead.
+      if (!munge_lines_to_quads(traverser, force)) {
         return false;
       }
     }
@@ -245,6 +258,167 @@ munge_instances(Thread *current_thread) {
   CPT(RenderState) state = RenderState::make(
     DCAST(ShaderAttrib, ShaderAttrib::make())->set_instance_count(_instances->size()));
   _state = _state->compose(state);
+}
+
+/**
+ * Converts the lines of the Geom into screen-aligned quads that have the
+ * thickness given by the RenderModeAttrib, for rendering on systems that don't
+ * support thick lines.  The quads are transformed back into the original
+ * coordinate space, so that they are still affected by shaders and fog.
+ *
+ * This replaces _geom, _munged_data and _state.
+ */
+bool CullableObject::
+munge_lines_to_quads(const CullTraverser *traverser, bool force) {
+  Thread *current_thread = traverser->get_current_thread();
+  PStatTimer timer(_munge_lines_pcollector, current_thread);
+
+  CPT(GeomVertexData) source_data =
+    _munged_data->animate_vertices(force, current_thread);
+  if (!force && !source_data->request_resident()) {
+    return false;
+  }
+
+  if (source_data->get_format()->get_animation().get_animation_type() == Geom::AT_hardware) {
+    // The quads have to be computed from the animated positions, so do the
+    // animation on the CPU instead.
+    PT(GeomVertexFormat) format = new GeomVertexFormat(*source_data->get_format());
+    GeomVertexAnimationSpec animation;
+    animation.set_panda();
+    format->set_animation(animation);
+    PT(GeomVertexData) data = new GeomVertexData(*source_data);
+    data->set_format(GeomVertexFormat::register_format(format));
+    source_data = data->animate_vertices(true, current_thread);
+  }
+
+  const RenderModeAttrib *render_mode;
+  if (!_state->get_attrib(render_mode)) {
+    return true;
+  }
+  PN_stdfloat thickness = render_mode->get_thickness();
+
+  // The quads are filled polygons, which shouldn't be drawn in wireframe.
+  _state = _state->set_attrib(RenderModeAttrib::make(RenderModeAttrib::M_filled, thickness));
+
+  GraphicsStateGuardianBase *gsg = traverser->get_gsg();
+  CoordinateSystem internal_cs = gsg->get_internal_coordinate_system();
+  SceneSetup *scene = traverser->get_scene();
+  const Lens *lens = scene->get_lens();
+  LMatrix4 projection =
+    LMatrix4::convert_mat(internal_cs, lens->get_coordinate_system()) *
+                                       lens->get_projection_mat();
+  LMatrix4 render_transform = _internal_transform->get_mat() * projection;
+  LMatrix4 inv_render_transform;
+  if (!inv_render_transform.invert_from(render_transform)) {
+    return true;
+  }
+
+  // Half the thickness, in normalized device coordinates.
+  PN_stdfloat half_x = thickness / std::max(scene->get_viewport_width(), 1);
+  PN_stdfloat half_y = thickness / std::max(scene->get_viewport_height(), 1);
+
+  pvector<unsigned int> segments;
+  {
+    GeomPipelineReader geom_reader(_geom, current_thread);
+    for (size_t pi = 0; pi < geom_reader.get_num_primitives(); ++pi) {
+      CPT(GeomPrimitive) primitive = geom_reader.get_primitive(pi)->decompose();
+      GeomPrimitivePipelineReader prim_reader(primitive, current_thread);
+      int num_vertices = prim_reader.get_num_vertices();
+      for (int i = 0; i + 1 < num_vertices; i += 2) {
+        segments.push_back(prim_reader.get_vertex(i));
+        segments.push_back(prim_reader.get_vertex(i + 1));
+      }
+    }
+  }
+
+  GeomVertexDataPipelineReader reader(source_data, current_thread);
+  reader.check_array_readers();
+  const GeomVertexFormat *format = reader.get_format();
+  int num_rows = reader.get_num_rows();
+
+  // Each segment becomes four vertices, which are copies of its endpoints but
+  // for the position.
+  PT(GeomVertexData) new_data = new GeomVertexData(source_data->get_name(), format, Geom::UH_stream);
+  size_t num_segments = segments.size() / 2;
+  new_data->unclean_set_num_rows(num_segments * 4);
+  {
+    GeomVertexDataPipelineWriter writer(new_data, true, current_thread);
+    writer.check_array_writers();
+    for (size_t ai = 0; ai < format->get_num_arrays(); ++ai) {
+      size_t stride = format->get_array(ai)->get_stride();
+      const unsigned char *from = reader.get_array_reader(ai)->get_read_pointer(true);
+      unsigned char *to = writer.get_array_writer(ai)->get_write_pointer();
+      for (size_t si = 0; si < num_segments; ++si) {
+        unsigned int a = segments[si * 2];
+        unsigned int b = segments[si * 2 + 1];
+        nassertr(a < (unsigned int)num_rows && b < (unsigned int)num_rows, false);
+        memcpy(to + (si * 4 + 0) * stride, from + a * stride, stride);
+        memcpy(to + (si * 4 + 1) * stride, from + b * stride, stride);
+        memcpy(to + (si * 4 + 2) * stride, from + a * stride, stride);
+        memcpy(to + (si * 4 + 3) * stride, from + b * stride, stride);
+      }
+    }
+  }
+
+  PT(GeomTriangles) triangles = new GeomTriangles(Geom::UH_stream);
+  if (num_segments * 4 >= 0xffff) {
+    triangles->set_index_type(Geom::NT_uint32);
+  }
+
+  GeomVertexReader vertex(&reader, InternalName::get_vertex());
+  GeomVertexWriter new_vertex(new_data, InternalName::get_vertex(), current_thread);
+  for (size_t si = 0; si < num_segments; ++si) {
+    vertex.set_row(segments[si * 2]);
+    LVecBase4 pa = vertex.get_data4() * render_transform;
+    vertex.set_row(segments[si * 2 + 1]);
+    LVecBase4 pb = vertex.get_data4() * render_transform;
+
+    // Clip the segment against the near plane, to avoid dividing by zero.
+    static const PN_stdfloat min_w = 1e-5f;
+    if (pa[3] < min_w && pb[3] < min_w) {
+      new_vertex.set_row(si * 4);
+      for (int i = 0; i < 4; ++i) {
+        new_vertex.set_data4(0, 0, 0, 1);
+      }
+      continue;
+    }
+    if (pa[3] < min_w) {
+      pa += (pb - pa) * ((min_w - pa[3]) / (pb[3] - pa[3]));
+    } else if (pb[3] < min_w) {
+      pb += (pa - pb) * ((min_w - pb[3]) / (pa[3] - pb[3]));
+    }
+
+    // The direction of the line on screen, in pixels, and the perpendicular
+    // offset to either side of it.
+    LVector2 dir((pb[0] / pb[3] - pa[0] / pa[3]) / half_x,
+                 (pb[1] / pb[3] - pa[1] / pa[3]) / half_y);
+    if (!dir.normalize()) {
+      dir.set(1, 0);
+    }
+    LVector2 offset(-dir[1] * half_x, dir[0] * half_y);
+
+    // Each corner is offset in clip space, so multiplied by w.
+    LVecBase4 corners[4] = {
+      pa - LVecBase4(offset[0], offset[1], 0, 0) * pa[3],
+      pb - LVecBase4(offset[0], offset[1], 0, 0) * pb[3],
+      pa + LVecBase4(offset[0], offset[1], 0, 0) * pa[3],
+      pb + LVecBase4(offset[0], offset[1], 0, 0) * pb[3],
+    };
+    new_vertex.set_row(si * 4);
+    for (const LVecBase4 &corner : corners) {
+      new_vertex.set_data4(inv_render_transform.xform(corner));
+    }
+
+    triangles->add_vertices(si * 4 + 0, si * 4 + 1, si * 4 + 2);
+    triangles->add_vertices(si * 4 + 2, si * 4 + 1, si * 4 + 3);
+  }
+  triangles->close_primitive();
+
+  PT(Geom) new_geom = new Geom(new_data);
+  new_geom->add_primitive(triangles);
+  _geom = new_geom;
+  _munged_data = new_data;
+  return true;
 }
 
 /**

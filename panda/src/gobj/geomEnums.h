@@ -141,6 +141,9 @@ PUBLISHED:
 
     // Supports automated hardware animation.
     GR_shader_vertex_blend  = 0x400000,
+
+    // If lines are drawn thicker than one pixel.
+    GR_line_thickness       = 0x800000,
   };
 
   // The shade model specifies whether the per-vertex colors and normals

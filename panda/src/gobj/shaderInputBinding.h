@@ -74,6 +74,9 @@ public:
   typedef ShaderInputBinding *(*Binder)(const InternalName *name, const ShaderType *type);
   static void register_binder(ShaderEnums::SourceLanguage language, int sort, Binder binder);
 
+  virtual bool is_model_to_apiclip_matrix() const { return false; }
+  virtual bool is_color_scale() const { return false; }
+
 private:
   struct BinderDef {
     ShaderEnums::SourceLanguage _lang;

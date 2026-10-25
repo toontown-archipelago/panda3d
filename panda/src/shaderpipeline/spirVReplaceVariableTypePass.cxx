@@ -28,6 +28,48 @@ SpirVReplaceVariableTypePass(Id variable_id, const ShaderType *type,
 }
 
 /**
+ * Converts a value of the given type, which may be a composite, to the given
+ * other type, which must have the same structure, converting each scalar.
+ */
+SpirVId SpirVReplaceVariableTypePass::
+convert_value(SpirVBuilder &builder, Id value, const ShaderType *from,
+              const ShaderType *to) {
+  if (from == to) {
+    return value;
+  }
+  if (const ShaderType::Scalar *scalar = to->as_scalar()) {
+    return builder.op_convert(scalar->get_scalar_type(), value);
+  }
+  if (const ShaderType::Vector *vector = to->as_vector()) {
+    return builder.op_convert(vector->get_scalar_type(), value);
+  }
+
+  pvector<Id> members;
+  if (const ShaderType::Array *to_array = to->as_array()) {
+    const ShaderType::Array *from_array = from->as_array();
+    nassertr(from_array != nullptr, value);
+    for (uint32_t i = 0; i < to_array->get_num_elements(); ++i) {
+      Id element = builder.op_composite_extract(value, {i});
+      members.push_back(convert_value(builder, element, from_array->get_element_type(),
+                                      to_array->get_element_type()));
+    }
+  }
+  else if (const ShaderType::Struct *to_struct = to->as_struct()) {
+    const ShaderType::Struct *from_struct = from->as_struct();
+    nassertr(from_struct != nullptr, value);
+    for (uint32_t i = 0; i < (uint32_t)to_struct->get_num_members(); ++i) {
+      Id member = builder.op_composite_extract(value, {i});
+      members.push_back(convert_value(builder, member, from_struct->get_member(i).type,
+                                      to_struct->get_member(i).type));
+    }
+  }
+  else {
+    nassertr(false, value);
+  }
+  return builder.op_composite_construct(to, members);
+}
+
+/**
  *
  */
 void SpirVReplaceVariableTypePass::
@@ -66,7 +108,21 @@ run(SpirVModule &module) {
     while (cursor.next()) {
       switch (cursor->opcode) {
       case spv::OpLoad:
-        if (_pointer_ids.count(Id(cursor->args[2]))) {
+        if (_sub_pointer_types.count(Id(cursor->args[2]))) {
+          // A load through an access chain into the retyped variable.  Convert
+          // it to the type that the rest of the shader expects.
+          Id result_id(cursor->args[1]);
+          Id pointer_id(cursor->args[2]);
+          const ShaderType *result_type = module.resolve_type(result_id);
+          const ShaderType *new_type = _sub_pointer_types[pointer_id];
+          nassertv(result_type != nullptr);
+          if (result_type != new_type) {
+            cursor.replace([&](SpirVBuilder &builder) -> Id {
+              return convert_value(builder, builder.op_load(pointer_id), new_type, result_type);
+            });
+          }
+        }
+        else if (_pointer_ids.count(Id(cursor->args[2]))) {
           Id result_id(cursor->args[1]);
           Id var_id(cursor->args[2]);
 
@@ -120,11 +176,65 @@ run(SpirVModule &module) {
               return builder.op_convert(new_scalar->get_scalar_type(), temp);
             });
           }
+          else if (result_type != _new_type &&
+                   (result_type->as_array() != nullptr || result_type->as_struct() != nullptr)) {
+            // A whole array or struct; convert it member by member.
+            cursor.replace([&](SpirVBuilder &builder) -> Id {
+              return convert_value(builder, builder.op_load(var_id), _new_type, result_type);
+            });
+          }
           else {
             cursor->args[0] = _type_id;
             module.record_result(*cursor, function.id);
             _object_ids.insert(result_id);
           }
+        }
+        break;
+
+      case spv::OpAccessChain:
+      case spv::OpInBoundsAccessChain:
+        {
+          // Indexing into the retyped variable, or into a part of it.  The
+          // result points to the corresponding part of the new type.
+          Id base_id(cursor->args[2]);
+          const ShaderType *type = nullptr;
+          if (_pointer_ids.count(base_id)) {
+            type = _new_type;
+          } else {
+            auto it = _sub_pointer_types.find(base_id);
+            if (it != _sub_pointer_types.end()) {
+              type = it->second;
+            }
+          }
+          if (type == nullptr) {
+            break;
+          }
+
+          Instruction &op = *cursor;
+          for (size_t i = 3; i < op.args.size() && type != nullptr; ++i) {
+            if (const ShaderType::Struct *struct_type = type->as_struct()) {
+              uint32_t member = module.resolve_constant(Id(op.args[i]));
+              type = (member < struct_type->get_num_members())
+                   ? struct_type->get_member(member).type : nullptr;
+            }
+            else if (const ShaderType::Array *array_type = type->as_array()) {
+              type = array_type->get_element_type();
+            }
+            else if (const ShaderType::Vector *vector_type = type->as_vector()) {
+              type = ShaderType::register_type(ShaderType::Scalar(vector_type->get_scalar_type()));
+            }
+            else if (const ShaderType::Matrix *matrix_type = type->as_matrix()) {
+              type = ShaderType::register_type(ShaderType::Vector(matrix_type->get_scalar_type(), matrix_type->get_num_columns()));
+            }
+            else {
+              type = nullptr;
+            }
+          }
+          nassertd(type != nullptr) break;
+
+          op.args[0] = module.define_pointer_type(type, _new_storage_class);
+          module.record_result(op, function.id);
+          _sub_pointer_types[Id(op.args[1])] = type;
         }
         break;
 

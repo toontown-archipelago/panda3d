@@ -56,7 +56,7 @@ ShaderPackedLightBinding(int index) :
 INLINE ShaderLegacyLightBinding::
 ShaderLegacyLightBinding(CPT_InternalName input, ShaderEnums::StateMatrix matrix,
                          CPT_InternalName arg) :
-  _input(input.p()),
+  _input(std::move(input)),
   _matrix(matrix),
   _arg(std::move(arg)) {
 }
@@ -78,7 +78,7 @@ ShaderTextureStagesBinding(Texture::TextureType desired_type, size_t count,
  */
 INLINE ShaderTextureBinding::
 ShaderTextureBinding(CPT(InternalName) input, Texture::TextureType desired_type) :
-  _input(input.p()),
+  _input(std::move(input)),
   _desired_type(desired_type) {
 }
 
@@ -87,7 +87,7 @@ ShaderTextureBinding(CPT(InternalName) input, Texture::TextureType desired_type)
  */
 INLINE ShaderBufferBinding::
 ShaderBufferBinding(CPT(InternalName) input, size_t min_size) :
-  _input(input.p()),
+  _input(std::move(input)),
   _min_size(min_size) {
 }
 
@@ -95,9 +95,9 @@ ShaderBufferBinding(CPT(InternalName) input, size_t min_size) :
  *
  */
 INLINE ShaderDataBinding::
-ShaderDataBinding(const InternalName *input,
+ShaderDataBinding(CPT_InternalName input,
                   size_t num_elements, size_t num_rows, size_t num_cols) :
-  _input(input),
+  _input(std::move(input)),
   _num_elements(num_elements),
   _num_rows(num_rows),
   _num_cols(num_cols) {

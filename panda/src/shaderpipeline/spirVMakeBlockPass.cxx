@@ -58,6 +58,9 @@ run(SpirVModule &module) {
   }
 
   // Rewrite all accesses to the old variables into accesses to the block.
+  // Pointers derived from those accesses are tracked, since their storage
+  // class changes as well.
+  pset<Id> derived_ids;
   for (Function &function : module.modify_functions()) {
     SpirVInstructionCursor cursor(module, function);
     while (cursor.next()) {
@@ -97,6 +100,15 @@ run(SpirVModule &module) {
 
             // The result type changed; make the id index follow.
             module.record_result(op, function.id);
+            derived_ids.insert(Id(op.args[1]));
+          }
+          else if (op.args.size() >= 3 && derived_ids.count(Id(op.args[2]))) {
+            // An access chain into the result of one of the above; it now
+            // points into the block as well.
+            op.args[0] = module.define_pointer_type(
+              module.resolve_type(Id(op.args[0])), _storage_class);
+            module.record_result(op, function.id);
+            derived_ids.insert(Id(op.args[1]));
           }
         }
         break;

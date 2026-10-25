@@ -3421,6 +3421,12 @@ compile_spirv_to_glsl(const ShaderModuleSpirV *module, size_t mi,
     }
   }
 
+  if (!explicit_uniform_locations) {
+    // Without explicit locations, we can't rely on the program interface
+    // query (eg. macOS only has GL 4.1), so query the locations by name.
+    _remap_locations = true;
+  }
+
   // Assign names based on locations.  This is important to make sure that
   // uniforms shared between shader stages have the same name, or the
   // compiler may start to complain about overlapping locations.

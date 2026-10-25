@@ -1055,6 +1055,27 @@ reset() {
     }
 #endif
   }
+  bool wide_lines = (_max_line_width > 1.0f);
+#ifndef OPENGLES
+  if (wide_lines && _core_profile) {
+    // A forward-compatible context (such as any core context on macOS)
+    // doesn't allow wide lines, whatever range it reports.
+    GLint flags = 0;
+    glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
+    while (glGetError() != GL_NO_ERROR) {
+    }
+    glLineWidth(2.0f);
+    bool rejected = (glGetError() != GL_NO_ERROR);
+    glLineWidth(1.0f);
+    if ((flags & GL_CONTEXT_FLAG_FORWARD_COMPATIBLE_BIT) != 0 || rejected) {
+      wide_lines = false;
+    }
+  }
+#endif
+  if (wide_lines) {
+    // Otherwise, thick lines are drawn as quads instead.
+    _supported_geom_rendering |= Geom::GR_line_thickness;
+  }
 
 #ifdef OPENGLES_1
   // OpenGL ES 1.0 does not support primitive restart indices.

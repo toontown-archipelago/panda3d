@@ -1025,6 +1025,15 @@ unbind_context() {
 }
 
 /**
+ * Returns the window's backing scale factor.
+ */
+CGFloat CocoaGraphicsWindow::
+get_backing_scale_factor() const {
+  // This is Objective-C code so we can't put it in the .I file.
+  return _window.backingScaleFactor;
+}
+
+/**
  * Returns an appropriate CGDisplayModeRef for the given width and height, or
  * NULL if none was found.
  */
@@ -1569,36 +1578,12 @@ handle_close_event() {
 
   _window = nil;
 
-  // Get rid of the GSG
-  if (_gsg != nullptr) {
-    unbind_context();
-    _gsg.clear();
-  }
-
-  // Dump the view, too
-  if (_view != nil) {
-    [_view release];
-    _view = nil;
-  }
-
-  // Unhide the mouse cursor
-  if (_mouse_hidden) {
-    [NSCursor unhide];
-    _mouse_hidden = false;
-  }
-
-  // Release the cursor.
-  if (_cursor != nil) {
-    [_cursor release];
-    _cursor = nil;
-  }
+  close_window();
 
   WindowProperties properties;
   properties.set_open(false);
   properties.set_cursor_hidden(false);
   system_changed_properties(properties);
-
-  GraphicsWindow::close_window();
 }
 
 /**

@@ -8,6 +8,7 @@ set(P3SHADERPIPELINE_HEADERS
   spirVDebugOutputPass.h spirVDebugOutputPass.I
   spirVEmulateTextureQueriesPass.h
   spirVFlattenStructPass.h
+  spirVFlipFragCoordPass.h
   spirVHoistStructResourcesPass.h
   spirVId.h
   spirVInjectAlphaTestPass.h
@@ -32,6 +33,7 @@ set(P3SHADERPIPELINE_SOURCES
   spirVEmulateTextureQueriesPass.cxx
   spirVDebugOutputPass.cxx
   spirVFlattenStructPass.cxx
+  spirVFlipFragCoordPass.cxx
   spirVHoistStructResourcesPass.cxx
   spirVInjectAlphaTestPass.cxx
   spirVInjectVertexTransformPass.cxx

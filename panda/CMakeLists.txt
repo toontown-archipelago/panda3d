@@ -63,6 +63,7 @@ add_subdirectory(src/x11display)
 
 # Creates a metalib, so should go after
 add_subdirectory(src/tinydisplay)
+add_subdirectory(src/metaldisplay)
 
 # For other components
 # bullet

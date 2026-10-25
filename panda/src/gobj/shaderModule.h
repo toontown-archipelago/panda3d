@@ -111,6 +111,8 @@ public:
 #endif
   INLINE int find_parameter(CPT_InternalName name) const;
 
+  pvector<uint32_t> get_parameter_ids_from_names(const pvector<const InternalName *> &names) const;
+
   virtual bool link_inputs(const ShaderModule *previous, pmap<int, int> &remap) const;
   virtual void remap_input_locations(const pmap<int, int> &remap);
 

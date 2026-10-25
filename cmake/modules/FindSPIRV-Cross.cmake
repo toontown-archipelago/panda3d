@@ -22,6 +22,9 @@ find_library(SPIRV_CROSS_GLSL_LIBRARY
 find_library(SPIRV_CROSS_HLSL_LIBRARY
   NAMES "spirv-cross-hlsl")
 
+find_library(SPIRV_CROSS_MSL_LIBRARY
+  NAMES "spirv-cross-msl")
+
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(SPIRV-Cross DEFAULT_MSG SPIRV_CROSS_INCLUDE_DIR SPIRV_CROSS_LIBRARIES)
 
@@ -52,5 +55,14 @@ if(SPIRV_CROSS_HLSL_LIBRARY)
 
   set_target_properties(SPIRV-Cross::HLSL PROPERTIES
     IMPORTED_LOCATION "${SPIRV_CROSS_HLSL_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${SPIRV_CROSS_INCLUDE_DIR}")
+endif()
+
+if(SPIRV_CROSS_MSL_LIBRARY)
+  add_library(SPIRV-Cross::MSL UNKNOWN IMPORTED)
+  target_link_libraries(SPIRV-Cross::MSL INTERFACE SPIRV-Cross::GLSL)
+
+  set_target_properties(SPIRV-Cross::MSL PROPERTIES
+    IMPORTED_LOCATION "${SPIRV_CROSS_MSL_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES "${SPIRV_CROSS_INCLUDE_DIR}")
 endif()

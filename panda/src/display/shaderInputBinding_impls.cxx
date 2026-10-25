@@ -45,7 +45,7 @@ static Texture *
 get_white_texture() {
   Texture *tex = white_texture.p();
   if (tex == nullptr) {
-    tex = new Texture;
+    tex = new Texture("<white>");
     tex->setup_2d_texture(1, 1, Texture::T_unsigned_byte, Texture::F_rgba);
     tex->set_clear_color(LVecBase4(1, 1, 1, 1));
     tex->set_minfilter(SamplerState::FT_nearest);
@@ -678,17 +678,27 @@ make_color(const ShaderType *type) {
  */
 static ShaderInputBinding *
 make_color_scale(const ShaderType *type) {
-  return ShaderInputBinding::make_data(Shader::D_colorscale,
-                                       [](const State &state, void *into, bool packed) {
-
-    const ColorScaleAttrib *target_color_scale = (const ColorScaleAttrib *)
-      state.gsg->get_target_state()->get_attrib_def(ColorScaleAttrib::get_class_slot());
-    if (!target_color_scale->is_identity()) {
-      *(LVecBase4f *)into = LCAST(float, target_color_scale->get_scale());
-    } else {
-      *(LVecBase4f *)into = LVecBase4f(1, 1, 1, 1);
+  class ShaderColorScaleBinding final : public ShaderInputBinding {
+  public:
+    virtual int get_state_dep() const override final {
+      return Shader::D_colorscale;
     }
-  });
+
+    virtual void fetch_data(const State &state, void *into, bool packed) const override final {
+      const ColorScaleAttrib *target_color_scale = (const ColorScaleAttrib *)
+        state.gsg->get_target_state()->get_attrib_def(ColorScaleAttrib::get_class_slot());
+      if (!target_color_scale->is_identity()) {
+        *(LVecBase4f *)into = LCAST(float, target_color_scale->get_scale());
+      } else {
+        *(LVecBase4f *)into = LVecBase4f(1, 1, 1, 1);
+      }
+    }
+
+    virtual bool is_color_scale() const override final {
+      return true;
+    }
+  };
+  return new ShaderColorScaleBinding;
 }
 
 /**
@@ -1118,6 +1128,16 @@ fetch_data(const State &state, void *into, bool packed) const {
   } else {
     memcpy(into, m.get_data(), _num_rows * 4 * sizeof(float));
   }
+}
+
+/**
+ *
+ */
+bool ShaderMatrixComposeBinding::
+is_model_to_apiclip_matrix() const {
+  return !_transpose && _num_rows == 4 && _num_cols == 4 &&
+    ((_input0 == Shader::SM_model_to_apiview && _input1 == Shader::SM_apiview_to_apiclip) ||
+     (_input0 == Shader::SM_model_to_view && _input1 == Shader::SM_view_to_apiclip));
 }
 
 /**
@@ -3270,7 +3290,7 @@ make_binding_cg(const InternalName *name, const ShaderType *type) {
         !expect_float_matrix(name, type, 4, 4)) {
       return nullptr;
     }
-    return make_texture_matrix(type, atoi(pieces[1].c_str()), false, false);
+    return make_texture_matrix(type, atoi(pieces[1].c_str()), false, true);
   }
 
   if (pieces[0] == "texscale") {

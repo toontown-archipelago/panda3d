@@ -3,6 +3,7 @@
 #include "spirVDebugOutputPass.cxx"
 #include "spirVEmulateTextureQueriesPass.cxx"
 #include "spirVFlattenStructPass.cxx"
+#include "spirVFlipFragCoordPass.cxx"
 #include "spirVHoistStructResourcesPass.cxx"
 #include "spirVInjectAlphaTestPass.cxx"
 #include "spirVInjectVertexTransformPass.cxx"

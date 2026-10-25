@@ -79,6 +79,7 @@ COPY_PYTHON = True
 
 PkgListSet(["PYTHON", "DIRECT",                        # Python support
   "GL", "GLES", "GLES2"] + DXVERSIONS + ["TINYDISPLAY",# 3D graphics
+  "METAL",                                             # Apple Metal
   "EGL",                                               # OpenGL (ES) integration
   "EIGEN",                                             # Linear algebra acceleration
   "OPENAL", "FMODEX",                                  # Audio playback
@@ -263,13 +264,17 @@ def parseopts(args):
             elif option == "--spirv-cross-incdir":
                 PkgSetCustomLocation('SPIRV-CROSS-HLSL')
                 PkgSetCustomLocation('SPIRV-CROSS-GLSL')
+                PkgSetCustomLocation('SPIRV-CROSS-MSL')
                 IncDirectory('SPIRV-CROSS-HLSL', value)
                 IncDirectory('SPIRV-CROSS-GLSL', value)
+                IncDirectory('SPIRV-CROSS-MSL', value)
             elif option == "--spirv-cross-libdir":
                 PkgSetCustomLocation('SPIRV-CROSS-HLSL')
                 PkgSetCustomLocation('SPIRV-CROSS-GLSL')
+                PkgSetCustomLocation('SPIRV-CROSS-MSL')
                 LibDirectory('SPIRV-CROSS-HLSL', value)
                 LibDirectory('SPIRV-CROSS-GLSL', value)
+                LibDirectory('SPIRV-CROSS-MSL', value)
             else:
                 for pkg in PkgListGet() + ['GLSLANG', 'SPIRV-TOOLS']:
                     if option == "--use-" + pkg.lower():
@@ -597,6 +602,7 @@ if (COMPILER == "MSVC"):
     PkgDisable("GLES2")
     PkgDisable("EGL")
     PkgDisable("COCOA")
+    PkgDisable("METAL")
     DefSymbol("FLEX", "YY_NO_UNISTD_H")
     if not PkgSkip("PYTHON"):
         IncDirectory("ALWAYS", SDK["PYTHON"] + "/include")
@@ -836,6 +842,7 @@ if (COMPILER == "MSVC"):
 if (COMPILER=="GCC"):
     if GetTarget() != "darwin":
         PkgDisable("COCOA")
+        PkgDisable("METAL")
 
     if GetTarget() == 'darwin':
         if OSX_ARCHS and 'x86_64' not in OSX_ARCHS and 'i386' not in OSX_ARCHS:
@@ -897,6 +904,8 @@ if (COMPILER=="GCC"):
     SmartPkgEnable("SPIRV-TOOLS", "",        ("SPIRV-Tools-opt", "SPIRV-Tools"), "spirv-tools/optimizer.hpp")
     SmartPkgEnable("SPIRV-CROSS-GLSL", "",   ("spirv-cross-core", "spirv-cross-glsl"), "spirv_cross/spirv_cross.hpp", thirdparty_dir="spirv-cross")
     SmartPkgEnable("SPIRV-CROSS-HLSL", "",   ("spirv-cross-core", "spirv-cross-hlsl"), "spirv_cross/spirv_cross.hpp", thirdparty_dir="spirv-cross")
+    if GetTarget() == 'darwin':
+        SmartPkgEnable("SPIRV-CROSS-MSL", "", ("spirv-cross-core", "spirv-cross-glsl", "spirv-cross-msl"), "spirv_cross/spirv_msl.hpp", thirdparty_dir="spirv-cross")
     SmartPkgEnable("MIMALLOC",  "",          ("mimalloc"), "mimalloc.h")
 
     if GetTarget() != 'emscripten':
@@ -1039,6 +1048,9 @@ if (COMPILER=="GCC"):
         LibName("SPIRV-CROSS-GLSL", "-Wl,--exclude-libs,libspirv-cross-glsl.a")
         LibName("SPIRV-CROSS-HLSL", "-Wl,--exclude-libs,libspirv-cross-core.a")
         LibName("SPIRV-CROSS-HLSL", "-Wl,--exclude-libs,libspirv-cross-hlsl.a")
+        LibName("SPIRV-CROSS-MSL", "-Wl,--exclude-libs,libspirv-cross-core.a")
+        LibName("SPIRV-CROSS-MSL", "-Wl,--exclude-libs,libspirv-cross-glsl.a")
+        LibName("SPIRV-CROSS-MSL", "-Wl,--exclude-libs,libspirv-cross-msl.a")
 
     if PkgSkip("FFMPEG") or GetTarget() == "darwin":
         cv_lib = ChooseLib(("opencv_core", "cv"), "OPENCV")
@@ -1135,6 +1147,9 @@ if (COMPILER=="GCC"):
         LibName("QUARTZ", "-framework Quartz")
         LibName("CARBON", "-framework Carbon")
         LibName("COCOA", "-framework Cocoa")
+        LibName("METAL", "-framework Metal")
+        LibName("METAL", "-framework QuartzCore")
+        LibName("METAL", "-weak_framework MetalFX")
         # Fix for a bug in OSX Leopard:
         LibName("GL", "-dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib")
         # When using pre-11.0 SDKs, for PStats
@@ -1231,6 +1246,7 @@ def printStatus(header,warnings):
 def BracketNameWithQuotes(name):
     # Workaround for OSX bug - compiler doesn't like those flags quoted.
     if (name.startswith("-framework")): return name
+    if (name.startswith("-weak_framework")): return name
     if (name.startswith("-dylib_file")): return name
     if (name.startswith("-undefined ")): return name
 
@@ -1406,7 +1422,7 @@ def CompileCxx(obj,src,opts):
             if SDK.get("MACOSX"):
                 cmd += " -isysroot " + SDK["MACOSX"]
 
-            if tuple(OSX_ARCHS) == ('arm64',):
+            if "METAL" in opts or tuple(OSX_ARCHS) == ('arm64',):
                 cmd += " -mmacosx-version-min=11.0"
             else:
                 cmd += " -mmacosx-version-min=10.13"
@@ -1952,7 +1968,7 @@ def CompileLink(dll, obj, opts):
             if SDK.get("MACOSX"):
                 cmd += " -isysroot " + SDK["MACOSX"] + " -Wl,-syslibroot," + SDK["MACOSX"]
 
-            if tuple(OSX_ARCHS) == ('arm64',):
+            if "METAL" in opts or tuple(OSX_ARCHS) == ('arm64',):
                 cmd += " -mmacosx-version-min=11.0"
             else:
                 cmd += " -mmacosx-version-min=10.13"
@@ -3078,6 +3094,9 @@ elif PkgSkip("GLES2") or GetLinkAllStatic():
 if PkgSkip("DX9") or GetLinkAllStatic():
     configprc = configprc.replace("\n#load-display pandadx9", "")
 
+if PkgSkip("METAL") or GetTarget() != 'darwin' or GetLinkAllStatic():
+    configprc = configprc.replace("\n#load-display p3metaldisplay", "")
+
 if PkgSkip("TINYDISPLAY") or GetLinkAllStatic():
     configprc = configprc.replace("\n#load-display p3tinydisplay", "")
 
@@ -3400,6 +3419,8 @@ elif GetTarget() == 'darwin':
     CopyAllHeaders('panda/src/cocoadisplay')
     if not PkgSkip('GL'):
         CopyAllHeaders('panda/src/cocoagldisplay')
+    if not PkgSkip('METAL'):
+        CopyAllHeaders('panda/src/metaldisplay')
 elif GetTarget() == 'android':
     CopyAllHeaders('panda/src/android')
     CopyAllHeaders('panda/src/androiddisplay')
@@ -4722,6 +4743,18 @@ if GetTarget() == 'darwin' and not PkgSkip("COCOA") and not PkgSkip("GL"):
         TargetAdd('libpandagl.dll', input='libpandafx.dll')
     TargetAdd('libpandagl.dll', input=COMMON_PANDA_LIBS)
     TargetAdd('libpandagl.dll', opts=['MODULE', 'GL', 'COCOA', 'CARBON', 'QUARTZ', 'SPIRV-CROSS-GLSL'])
+
+#
+# DIRECTORY: panda/src/metaldisplay/
+#
+
+if GetTarget() == 'darwin' and not PkgSkip("COCOA") and not PkgSkip("METAL"):
+    OPTS=['DIR:panda/src/metaldisplay', 'BUILDING:METALDISPLAY', 'METAL', 'SPIRV-CROSS-MSL', 'SPIRV-TOOLS', 'EXCEPTIONS']
+    TargetAdd('p3metaldisplay_composite1.obj', opts=OPTS, input='p3metaldisplay_composite1.mm')
+    TargetAdd('libp3metaldisplay.dll', input='p3metaldisplay_composite1.obj')
+    TargetAdd('libp3metaldisplay.dll', input='p3cocoadisplay_composite1.obj')
+    TargetAdd('libp3metaldisplay.dll', input=COMMON_PANDA_LIBS)
+    TargetAdd('libp3metaldisplay.dll', opts=['MODULE', 'METAL', 'COCOA', 'CARBON', 'QUARTZ', 'SPIRV-CROSS-MSL'])
 
 #
 # DIRECTORY: panda/src/wgldisplay/

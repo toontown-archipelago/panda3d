@@ -730,6 +730,40 @@ add_parameter(const InternalName *name, const ShaderType *type, int location) {
   }
 }
 
+
+/**
+ * Parses the part of a Cg-style vertex input name (such as vtx_texcoord1 or
+ * vtx_texcoord_UVMap) that follows the base name.  A number indicates the
+ * index of the texture stage whose texcoord name to use, whereas a name
+ * (with the dots replaced by underscores, as the shader generator writes it)
+ * is appended to the base name.
+ */
+static void
+parse_cg_vertex_input_suffix(const std::string &name_str, size_t start,
+                             Shader::VertexInputBinding &bind) {
+  if (name_str.size() <= start) {
+    return;
+  }
+  if (isdigit(name_str[start])) {
+    bind._append_uv = atoi(name_str.c_str() + start);
+  }
+  else if (name_str[start] == '_') {
+    PT(InternalName) name = (InternalName *)bind._name.p();
+    size_t p = start + 1;
+    while (p <= name_str.size()) {
+      size_t q = name_str.find('_', p);
+      if (q == std::string::npos) {
+        q = name_str.size();
+      }
+      if (q > p) {
+        name = name->append(name_str.substr(p, q - p));
+      }
+      p = q + 1;
+    }
+    bind._name = name;
+  }
+}
+
 /**
  * Binds a vertex input parameter with the given type.
  */
@@ -806,21 +840,15 @@ bind_vertex_input(const InternalName *name, const ShaderType *type, int location
     }
     else if (name_str.substr(4, 8) == "texcoord") {
       bind._name = InternalName::get_texcoord();
-      if (name_str.size() > 12) {
-        bind._append_uv = atoi(name_str.c_str() + 12);
-      }
+      parse_cg_vertex_input_suffix(name_str, 12, bind);
     }
     else if (name_str.substr(4, 7) == "tangent") {
       bind._name = InternalName::get_tangent();
-      if (name_str.size() > 11) {
-        bind._append_uv = atoi(name_str.c_str() + 11);
-      }
+      parse_cg_vertex_input_suffix(name_str, 11, bind);
     }
     else if (name_str.substr(4, 8) == "binormal") {
       bind._name = InternalName::get_binormal();
-      if (name_str.size() > 11) {
-        bind._append_uv = atoi(name_str.c_str() + 11);
-      }
+      parse_cg_vertex_input_suffix(name_str, 12, bind);
     }
     else {
       bind._name = InternalName::make(name_str.substr(4));

@@ -16,6 +16,8 @@
 
 #include "spirVTransformPass.h"
 
+class SpirVBuilder;
+
 /**
  * Changes the type of a given variable.  Does not check that the existing
  * usage of the variable in the shader is valid with the new type - it only
@@ -32,6 +34,9 @@ public:
   virtual std::string_view get_name() const override { return "SpirVReplaceVariableTypePass"; }
 
 private:
+  Id convert_value(SpirVBuilder &builder, Id value, const ShaderType *from,
+                   const ShaderType *to);
+
   const Id _variable_id;
   const ShaderType *const _new_type;
   const spv::StorageClass _new_storage_class;
@@ -40,6 +45,10 @@ private:
   Id _type_id;
   pset<Id> _pointer_ids;
   pset<Id> _object_ids;
+
+  // Pointers into a part of the retyped variable, with the new type of the
+  // part they point to.
+  pmap<Id, const ShaderType *> _sub_pointer_types;
 };
 
 #endif

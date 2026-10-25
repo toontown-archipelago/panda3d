@@ -61,6 +61,8 @@ public:
 
   virtual void fetch_data(const State &state, void *into, bool packed) const override;
 
+  virtual bool is_model_to_apiclip_matrix() const override;
+
 private:
   size_t _cache_index0 = 0;
   size_t _cache_index1 = 0;
@@ -274,7 +276,7 @@ protected:
  */
 class EXPCL_PANDA_DISPLAY ShaderDataBinding : public ShaderInputBinding {
 public:
-  INLINE ShaderDataBinding(const InternalName *input, size_t num_elements,
+  INLINE ShaderDataBinding(CPT_InternalName input, size_t num_elements,
                            size_t num_rows, size_t num_cols);
 
   virtual int get_state_dep() const override;

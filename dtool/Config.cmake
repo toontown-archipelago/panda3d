@@ -572,6 +572,11 @@ endif()
 cmake_dependent_option(HAVE_COCOA "Enable Cocoa. Requires Mac OS X." ON
   "APPLE" OFF)
 
+cmake_dependent_option(HAVE_METAL "Enable the Metal renderer.  Requires macOS
+  11 and SPIRV-Cross built with MSL support; the renderer only runs on Apple
+  GPUs." ON
+  "APPLE;HAVE_COCOA" OFF)
+
 #
 # Miscellaneous settings
 #
