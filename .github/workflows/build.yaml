@@ -125,6 +125,12 @@ jobs:
             libpng-dev \
             libsquish-dev \
             libssl-dev \
+            libopenal-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxcursor-dev \
             patchelf \
             pkg-config
 
