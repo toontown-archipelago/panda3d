@@ -612,8 +612,21 @@ class WheelFile(object):
     def write_directory(self, target_dir, source_dir):
         """Adds the given directory recursively to the .whl file."""
 
-        for root, dirs, files in os.walk(source_dir):
+        def safe_walk(top):
+            dirs = []
+            nondirs = []
+            for entry in os.listdir(top):
+                path = os.path.join(top, entry)
+                if os.path.isdir(path):
+                    dirs.append(entry)
+                else:
+                    nondirs.append(entry)
+            yield top, dirs, nondirs
             dirs.sort()
+            for name in dirs:
+                yield from safe_walk(os.path.join(top, name))
+
+        for root, dirs, files in safe_walk(source_dir):
             for file in sorted(files):
                 if os.path.splitext(file)[1] in EXCLUDE_EXT:
                     continue

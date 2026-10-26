@@ -1940,6 +1940,9 @@ def SmartPkgEnable(pkg, pkgconfig = None, libs = None, incs = None, defs = None,
 
             elif SystemLibraryExists(libname):
                 # It exists in a system library directory.
+                loc = LocateLibrary(libname, SYS_LIB_DIRS)
+                if loc is not None:
+                    LibDirectory(target_pkg, os.path.dirname(loc))
                 LibName(target_pkg, "-l" + libname)
                 in_system = True
             else:
@@ -1963,6 +1966,9 @@ def SmartPkgEnable(pkg, pkgconfig = None, libs = None, incs = None, defs = None,
 
             elif in_system and SystemLibraryExists(libname):
                 # It exists in a system library directory.
+                loc = LocateLibrary(libname, SYS_LIB_DIRS)
+                if loc is not None:
+                    LibDirectory(target_pkg, os.path.dirname(loc))
                 LibName(target_pkg, "-l" + libname)
             else:
                 # Try searching in the package's LibDirectories.
@@ -1986,18 +1992,24 @@ def SmartPkgEnable(pkg, pkgconfig = None, libs = None, incs = None, defs = None,
         # the include path and header files to check the existence of.
         for i in incs:
             incdir = None
+            found_dir = None
             for dir in incdirs:
                 if len(glob.glob(os.path.join(dir, i))) > 0:
                     incdir = sorted(glob.glob(os.path.join(dir, i)))[-1]
+                    found_dir = dir
+                    break
 
             # Note: It's possible to specify a file instead of a dir, for the sake of checking if it exists.
-            if incdir is None and (i.endswith('/Dense') or i.endswith(".h")):
+            if incdir is None and (i.endswith('/Dense') or i.endswith(".h") or i.endswith(".hpp")):
                 have_pkg = False
                 if VERBOSE or custom_loc:
                     print(GetColor("cyan") + "Couldn't find header file " + i + GetColor())
 
-            if incdir is not None and os.path.isdir(incdir):
-                IncDirectory(target_pkg, incdir)
+            if incdir is not None:
+                if os.path.isdir(incdir):
+                    IncDirectory(target_pkg, incdir)
+                elif os.path.isfile(incdir) and found_dir:
+                    IncDirectory(target_pkg, found_dir)
 
         if not have_pkg:
             if custom_loc:
@@ -3040,6 +3052,11 @@ def SetupBuildEnvironment(compiler):
         if sys.platform == "darwin":
             # We need to add this one explicitly for some reason.
             SYS_LIB_DIRS.append(SDK["MACOSX"] + "/usr/lib")
+            for prefix in ("/opt/homebrew", "/usr/local"):
+                if os.path.isdir(prefix + "/lib") and prefix + "/lib" not in SYS_LIB_DIRS:
+                    SYS_LIB_DIRS.append(prefix + "/lib")
+                if os.path.isdir(prefix + "/include") and prefix + "/include" not in SYS_INC_DIRS:
+                    SYS_INC_DIRS.append(prefix + "/include")
 
         if not SDK.get("MACOSX"):
             # gcc doesn't add this one, but we do want it:
