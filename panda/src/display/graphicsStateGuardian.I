@@ -485,6 +485,14 @@ get_max_vertex_transform_indices() const {
 }
 
 /**
+ * Returns true if the GSG supports vertex blending without a shader applied.
+ */
+INLINE bool GraphicsStateGuardian::
+get_supports_fixed_function_vertex_blending() const {
+  return _supports_fixed_function_vertex_blending;
+}
+
+/**
  * Returns true if this particular GSG has the property that any framebuffer-
  * to-texture copy results in a texture that is upside-down and backwards from
  * Panda's usual convention; that is, it copies into a texture from the bottom
@@ -568,11 +576,11 @@ get_supports_sampler_objects() const {
 }
 
 /**
- * Returns true if this particular GSG supports arbfp1+arbvp1 or above.
+ * Returns true if this particular GSG supports vertex and fragment shaders.
  */
 INLINE bool GraphicsStateGuardian::
 get_supports_basic_shaders() const {
-  return _supports_basic_shaders;
+  return (_supported_shader_caps & ShaderModule::C_basic_shader) != 0;
 }
 
 /**
@@ -580,7 +588,7 @@ get_supports_basic_shaders() const {
  */
 INLINE bool GraphicsStateGuardian::
 get_supports_geometry_shaders() const {
-  return _supports_geometry_shaders;
+  return (_supported_shader_caps & ShaderModule::C_geometry_shader) != 0;
 }
 
 /**
@@ -588,7 +596,7 @@ get_supports_geometry_shaders() const {
  */
 INLINE bool GraphicsStateGuardian::
 get_supports_tessellation_shaders() const {
-  return _supports_tessellation_shaders;
+  return (_supported_shader_caps & ShaderModule::C_tessellation_shader) != 0;
 }
 
 /**
@@ -596,11 +604,13 @@ get_supports_tessellation_shaders() const {
  */
 INLINE bool GraphicsStateGuardian::
 get_supports_compute_shaders() const {
-  return _supports_compute_shaders;
+  return (_supported_shader_caps & ShaderModule::C_compute_shader) != 0
+      && _max_compute_work_group_invocations > 0;
 }
 
 /**
  * Returns true if this particular GSG supports GLSL shaders.
+ * @deprecated This is now irrelevant, use get_supports_basic_shaders instead.
  */
 INLINE bool GraphicsStateGuardian::
 get_supports_glsl() const {
@@ -609,6 +619,7 @@ get_supports_glsl() const {
 
 /**
  * Returns true if this particular GSG supports HLSL shaders.
+ * @deprecated This is now irrelevant, use get_supports_basic_shaders instead.
  */
 INLINE bool GraphicsStateGuardian::
 get_supports_hlsl() const {
@@ -710,6 +721,45 @@ get_supports_dual_source_blending() const {
 }
 
 /**
+ * Returns the maximum number of work groups that can be submitted in a single
+ * compute dispatch.
+ *
+ * If compute shaders are supported, this will be at least 65535x65535x65535.
+ * Otherwise, it will be zero.
+ */
+INLINE LVecBase3i GraphicsStateGuardian::
+get_max_compute_work_group_count() const {
+  return _max_compute_work_group_count;
+}
+
+/**
+ * Returns the maximum number of invocations in each work group split out
+ * separately to every x, y, z dimension.  This limit applies in addition to
+ * the overall number of invocations, which is specified by
+ * get_max_compute_work_group_invocations().
+ *
+ * If compute shaders are supported, this will be at least 128x128x64.
+ * Otherwise, it will be zero.
+ */
+INLINE LVecBase3i GraphicsStateGuardian::
+get_max_compute_work_group_size() const {
+  return _max_compute_work_group_size;
+}
+
+/**
+ * Returns the maximum number of invocations in each work group as a product
+ * of the x, y, z dimensions.  This limit applies in addition to the
+ * per-dimension limits specified by get_max_compute_work_group_size().
+ *
+ * If compute shaders are supported, this will be at least 128.  Otherwise, it
+ * will be zero.
+ */
+INLINE int GraphicsStateGuardian::
+get_max_compute_work_group_invocations() const {
+  return _max_compute_work_group_invocations;
+}
+
+/**
  * Deprecated.  Use get_max_color_targets() instead, which returns the exact
  * same value.
  */
@@ -735,6 +785,14 @@ set_shader_model(ShaderModel shader_model) {
   if (shader_model <= _auto_detect_shader_model) {
     _shader_model = shader_model;
   }
+}
+
+/**
+ * Returns a bitmask of the supported shader capabilities.
+ */
+INLINE uint64_t GraphicsStateGuardian::
+get_supported_shader_capabilities() const {
+  return _supported_shader_caps;
 }
 
 /**
@@ -795,16 +853,6 @@ get_runtime_color_scale() const {
 }
 
 /**
- * Returns the coordinate system in effect on this particular gsg.  Normally,
- * this will be the default coordinate system, but it might be set differently
- * at runtime.
- */
-INLINE CoordinateSystem GraphicsStateGuardian::
-get_coordinate_system() const {
-  return _coordinate_system;
-}
-
-/**
  * Specifies the global quality_level to be imposed for all Textures rendered
  * by this GSG.  This overrides the value set on individual textures via
  * Texture::set_quality_level().  Set this to Texture::QL_default in order to
@@ -850,6 +898,31 @@ reset_if_new() {
 INLINE void GraphicsStateGuardian::
 mark_new() {
   _needs_reset = true;
+}
+
+/**
+ * This is only valid during rendering, and contains the RenderState last
+ * passed to set_state_and_transform.
+ */
+INLINE const RenderState *GraphicsStateGuardian::
+get_target_state() const {
+  return _target_rs.p();
+}
+
+/**
+ * This is only valid during rendering, and contains the ShaderAttrib in use.
+ */
+INLINE const ShaderAttrib *GraphicsStateGuardian::
+get_target_shader_attrib() const {
+  return _target_shader.p();
+}
+
+/**
+ *
+ */
+INLINE const GeomVertexDataPipelineReader *GraphicsStateGuardian::
+get_data_reader() const {
+  return _data_reader;
 }
 
 /**

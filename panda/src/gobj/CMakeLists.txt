@@ -4,6 +4,7 @@ set(P3GOBJ_HEADERS
   bufferContext.I bufferContext.h
   bufferContextChain.I bufferContextChain.h
   bufferResidencyTracker.I bufferResidencyTracker.h
+  circularAllocator.I circularAllocator.h
   config_gobj.h
   geom.h geom.I
   geomContext.I geomContext.h
@@ -48,7 +49,14 @@ set(P3GOBJ_HEADERS
   savedContext.I savedContext.h
   shader.I shader.h
   shaderBuffer.h shaderBuffer.I
+  shaderCompiler.h
+  shaderCompilerRegistry.h
   shaderContext.h shaderContext.I
+  shaderEnums.h
+  shaderInputBinding.h shaderInputBinding.I
+  shaderModule.h shaderModule.I
+  shaderPool.h shaderPool.I
+  shaderType.h shaderType.I
   simpleAllocator.h simpleAllocator.I
   simpleLru.h simpleLru.I
   sliderTable.I sliderTable.h
@@ -84,6 +92,7 @@ set(P3GOBJ_SOURCES
   bufferContextChain.cxx
   bufferResidencyTracker.cxx
   config_gobj.cxx
+  circularAllocator.cxx
   geomContext.cxx
   geom.cxx
   geomEnums.cxx
@@ -127,7 +136,14 @@ set(P3GOBJ_SOURCES
   savedContext.cxx
   shader.cxx
   shaderBuffer.cxx
+  shaderCompiler.cxx
+  shaderCompilerRegistry.cxx
   shaderContext.cxx
+  shaderEnums.cxx
+  shaderInputBinding.cxx
+  shaderModule.cxx
+  shaderPool.cxx
+  shaderType.cxx
   simpleAllocator.cxx
   simpleLru.cxx
   sliderTable.cxx
@@ -175,7 +191,7 @@ composite_sources(p3gobj P3GOBJ_SOURCES)
 add_component_library(p3gobj NOINIT SYMBOL BUILDING_PANDA_GOBJ
   ${P3GOBJ_HEADERS} ${P3GOBJ_SOURCES})
 target_link_libraries(p3gobj p3gsgbase p3pnmimage
-  PKG::ZLIB PKG::SQUISH PKG::CG)
+  PKG::ZLIB PKG::SQUISH)
 target_interrogate(p3gobj ALL EXTENSIONS ${P3GOBJ_IGATEEXT})
 
 if(HAVE_SQUISH)

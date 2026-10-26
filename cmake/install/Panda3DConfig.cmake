@@ -103,6 +103,11 @@
 #               Panda3D::OpenGLES2::pandagles2
 #
 #
+#   Metal     - Support for rendering with Metal, on macOS.
+#
+#               Panda3D::Metal::p3metaldisplay
+#
+#
 #   TinyDisplay - Support for software rendering.
 #
 #               Panda3D::TinyDisplay::p3tinydisplay
@@ -131,7 +136,7 @@ set(_panda_components
   Bullet ODE
   FFmpeg
   OpenAL FMOD
-  OpenGL DX9 OpenGLES1 OpenGLES2 TinyDisplay
+  OpenGL DX9 OpenGLES1 OpenGLES2 Metal TinyDisplay
   Vision VRPN
 )
 

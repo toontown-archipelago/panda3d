@@ -28,6 +28,11 @@
 
 #include "openSSLWrapper.h"
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+#define EVP_MD_CTX_new() EVP_MD_CTX_create()
+#define EVP_MD_CTX_free(ctx) EVP_MD_CTX_destroy(ctx)
+#endif
+
 using std::streamoff;
 using std::streampos;
 using std::streamsize;
@@ -311,8 +316,8 @@ close() {
  * or empty string on failure.
  */
 std::string ZipArchive::
-add_subfile(const std::string &subfile_name, const Filename &filename,
-            int compression_level) {
+add_subfile(std::string_view subfile_name, const Filename &filename,
+            int compression_level, size_t data_alignment) {
   nassertr(is_write_valid(), std::string());
 
 #ifndef HAVE_ZLIB
@@ -332,7 +337,7 @@ add_subfile(const std::string &subfile_name, const Filename &filename,
     return std::string();
   }
 
-  std::string name = add_subfile(subfile_name, in, compression_level);
+  std::string name = add_subfile(subfile_name, in, compression_level, data_alignment);
   vfs->close_read_file(in);
   return name;
 }
@@ -350,8 +355,8 @@ add_subfile(const std::string &subfile_name, const Filename &filename,
  * or empty string on failure.
  */
 std::string ZipArchive::
-add_subfile(const std::string &subfile_name, std::istream *subfile_data,
-            int compression_level) {
+add_subfile(std::string_view subfile_name, std::istream *subfile_data,
+            int compression_level, size_t data_alignment) {
   nassertr(is_write_valid(), string());
 
 #ifndef HAVE_ZLIB
@@ -362,14 +367,14 @@ add_subfile(const std::string &subfile_name, std::istream *subfile_data,
 
   std::string name = standardize_subfile_name(subfile_name);
   if (!name.empty()) {
-    Subfile *subfile = new Subfile(subfile_name, compression_level);
+    Subfile *subfile = new Subfile(name, compression_level, data_alignment);
 
     // Write it straight away, overwriting the index at the end of the file.
     // This index will be rewritten at the next call to flush() or close().
     std::streampos fpos = _index_start;
     _write->seekp(fpos);
 
-    if (!subfile->write_header(*_write, fpos)) {
+    if (!subfile->write_header(*_write, fpos, data_alignment)) {
       delete subfile;
       return "";
     }
@@ -400,8 +405,8 @@ add_subfile(const std::string &subfile_name, std::istream *subfile_data,
  * called, the text flag will be set on the subfile.
  */
 string ZipArchive::
-update_subfile(const std::string &subfile_name, const Filename &filename,
-               int compression_level) {
+update_subfile(std::string_view subfile_name, const Filename &filename,
+               int compression_level, size_t data_alignment) {
   nassertr(is_write_valid(), string());
 
 #ifndef HAVE_ZLIB
@@ -426,7 +431,7 @@ update_subfile(const std::string &subfile_name, const Filename &filename,
 
     // The subfile does not already exist or it is different from the source
     // file.  Add the new source file.
-    Subfile *subfile = new Subfile(name, compression_level);
+    Subfile *subfile = new Subfile(name, compression_level, data_alignment);
     add_new_subfile(subfile, compression_level);
   }
 
@@ -455,7 +460,7 @@ update_subfile(const std::string &subfile_name, const Filename &filename,
  */
 bool ZipArchive::
 add_jar_signature(const Filename &certificate, const Filename &pkey,
-                  const string &password, const string &alias) {
+                  const string &password, std::string_view alias) {
   VirtualFileSystem *vfs = VirtualFileSystem::get_global_ptr();
 
   // Read the certificate file from VFS.  First, read the complete file into
@@ -523,7 +528,7 @@ add_jar_signature(const Filename &certificate, const Filename &pkey,
  * The private key is expected to match the first certificate in the chain.
  */
 bool ZipArchive::
-add_jar_signature(X509 *cert, EVP_PKEY *pkey, const std::string &alias) {
+add_jar_signature(X509 *cert, EVP_PKEY *pkey, std::string_view alias) {
   nassertr(is_write_valid() && is_read_valid(), false);
   nassertr(cert != nullptr, false);
   nassertr(pkey != nullptr, false);
@@ -571,11 +576,11 @@ add_jar_signature(X509 *cert, EVP_PKEY *pkey, const std::string &alias) {
   const std::string header_digest = "VmrRqAIgAm0FCZViZFzpaP8OfDbN4iY0MyYFuzTMPv8=";
 
   std::stringstream manifest;
-  SHA256_CTX manifest_ctx;
-  SHA256_Init(&manifest_ctx);
+  EVP_MD_CTX *manifest_ctx = EVP_MD_CTX_new();
+  EVP_DigestInit_ex(manifest_ctx, EVP_sha256(), nullptr);
 
   manifest << header;
-  SHA256_Update(&manifest_ctx, header.data(), header.size());
+  EVP_DigestUpdate(manifest_ctx, header.data(), header.size());
 
   std::ostringstream sigfile_body;
 
@@ -594,20 +599,21 @@ add_jar_signature(X509 *cert, EVP_PKEY *pkey, const std::string &alias) {
     {
       std::istream *stream = open_read_subfile(subfile);
 
-      SHA256_CTX subfile_ctx;
-      SHA256_Init(&subfile_ctx);
+      EVP_MD_CTX *subfile_ctx = EVP_MD_CTX_new();
+      EVP_DigestInit_ex(subfile_ctx, EVP_sha256(), nullptr);
 
       char buffer[4096];
       stream->read(buffer, sizeof(buffer));
       size_t count = stream->gcount();
       while (count > 0) {
-        SHA256_Update(&subfile_ctx, buffer, count);
+        EVP_DigestUpdate(subfile_ctx, buffer, count);
         stream->read(buffer, sizeof(buffer));
         count = stream->gcount();
       }
       delete stream;
 
-      SHA256_Final(digest, &subfile_ctx);
+      EVP_DigestFinal_ex(subfile_ctx, digest, nullptr);
+      EVP_MD_CTX_free(subfile_ctx);
     }
 
     // Encode to base64.
@@ -616,24 +622,21 @@ add_jar_signature(X509 *cert, EVP_PKEY *pkey, const std::string &alias) {
     // Encode what we just wrote to the manifest file as well.
     {
       unsigned char digest[SHA256_DIGEST_LENGTH];
-
-      SHA256_CTX section_ctx;
-      SHA256_Init(&section_ctx);
-      SHA256_Update(&section_ctx, section.data(), section.size());
-      SHA256_Final(digest, &section_ctx);
+      EVP_Digest(section.data(), section.size(), digest, nullptr, EVP_sha256(), nullptr);
 
       sigfile_body << "SHA-256-Digest: " << base64_encode(digest, SHA256_DIGEST_LENGTH) << "\r\n\r\n";
     }
 
     manifest << section;
-    SHA256_Update(&manifest_ctx, section.data(), section.size());
+    EVP_DigestUpdate(manifest_ctx, section.data(), section.size());
   }
 
   // The hash for the whole manifest file goes at the beginning of the .SF file.
   std::stringstream sigfile;
   {
     unsigned char digest[SHA256_DIGEST_LENGTH];
-    SHA256_Final(digest, &manifest_ctx);
+    EVP_DigestFinal_ex(manifest_ctx, digest, nullptr);
+    EVP_MD_CTX_free(manifest_ctx);
     sigfile << "Signature-Version: 1.0\r\n";
     sigfile << "SHA-256-Digest-Manifest-Main-Attributes: " << header_digest << "\r\n";
     sigfile << "SHA-256-Digest-Manifest: " << base64_encode(digest, SHA256_DIGEST_LENGTH) << "\r\n\r\n";
@@ -761,7 +764,7 @@ repack() {
     // the checksum and sizes.
     subfile->_flags &= ~SF_data_descriptor;
 
-    if (!subfile->write_header(temp, fpos)) {
+    if (!subfile->write_header(temp, fpos, subfile->_data_alignment)) {
       success = false;
       continue;
     }
@@ -832,7 +835,7 @@ get_num_subfiles() const {
  * named subfile is not within the ZipArchive.
  */
 int ZipArchive::
-find_subfile(const std::string &subfile_name) const {
+find_subfile(std::string_view subfile_name) const {
   Subfile find_subfile;
   find_subfile._name = standardize_subfile_name(subfile_name);
   Subfiles::const_iterator fi;
@@ -850,8 +853,8 @@ find_subfile(const std::string &subfile_name) const {
  * least one file named "subfile_name/...".
  */
 bool ZipArchive::
-has_directory(const std::string &subfile_name) const {
-  string prefix = subfile_name;
+has_directory(std::string subfile_name) const {
+  string prefix = std::move(subfile_name);
   if (!prefix.empty()) {
     prefix += '/';
   }
@@ -882,8 +885,8 @@ has_directory(const std::string &subfile_name) const {
  * Returns true if successful, false otherwise.
  */
 bool ZipArchive::
-scan_directory(vector_string &contents, const std::string &subfile_name) const {
-  string prefix = subfile_name;
+scan_directory(vector_string &contents, std::string subfile_name) const {
+  string prefix = std::move(subfile_name);
   if (!prefix.empty()) {
     prefix += '/';
   }
@@ -1218,11 +1221,11 @@ ls(std::ostream &out) const {
  * This string may not be longer than 65535 characters.
  */
 void ZipArchive::
-set_comment(const std::string &comment) {
+set_comment(std::string comment) {
   nassertv(comment.size() <= 65535);
 
   if (_comment != comment) {
-    _comment = comment;
+    _comment = std::move(comment);
     _index_changed = true;
   }
 }
@@ -1398,8 +1401,8 @@ open_read_subfile(Subfile *subfile) {
  * Returns the standard form of the subfile name.
  */
 string ZipArchive::
-standardize_subfile_name(const std::string &subfile_name) const {
-  Filename name = subfile_name;
+standardize_subfile_name(std::string_view subfile_name) const {
+  Filename name(subfile_name);
   name.standardize();
   if (name.empty() || name == "/") {
     // Invalid empty name.
@@ -1666,13 +1669,14 @@ write_index(std::ostream &write, std::streampos &fpos) {
  * Creates a new subfile record.
  */
 ZipArchive::Subfile::
-Subfile(const std::string &name, int compression_level) :
-  _name(name),
+Subfile(std::string name, int compression_level, size_t data_alignment) :
+  _name(std::move(name)),
   _timestamp(dos_epoch),
-  _compression_method((compression_level > 0) ? CM_deflate : CM_store)
+  _compression_method((compression_level > 0) ? CM_deflate : CM_store),
+  _data_alignment(data_alignment)
 {
   // If the name contains any non-ASCII characters, we set the UTF-8 flag.
-  for (char c : name) {
+  for (char c : _name) {
     if (c & ~0x7f) {
       _flags |= SF_utf8_encoding;
       break;
@@ -2093,7 +2097,7 @@ write_index(std::ostream &write, streampos &fpos) {
  * than the actual size of the subfile).
  */
 bool ZipArchive::Subfile::
-write_header(std::ostream &write, std::streampos &fpos) {
+write_header(std::ostream &write, std::streampos &fpos, size_t data_alignment) {
   nassertr(write.tellp() == fpos, false);
 
   std::string encoded_name;
@@ -2106,13 +2110,29 @@ write_header(std::ostream &write, std::streampos &fpos) {
   std::streamoff header_size = 30 + encoded_name.size();
 
   StreamWriter writer(write);
-  int modulo = (fpos + header_size) % 4;
-  if (!is_compressed() && modulo != 0) {
+  if (!is_compressed()) {
     // Align uncompressed files to 4-byte boundary.  We don't really need to do
     // this, but it's needed when producing .apk files, and it doesn't really
     // cause harm to do it in other cases as well.
-    writer.pad_bytes(4 - modulo);
-    fpos += (4 - modulo);
+    if (data_alignment < 4) {
+      data_alignment = 4;
+    }
+    else if ((data_alignment % 4) != 0) {
+      data_alignment *= 2;
+      if ((data_alignment % 4) != 0) {
+        data_alignment *= 2;
+      }
+    }
+  }
+
+  if (data_alignment > 0) {
+    // The data follows the header directly, so the actual padding has to be
+    // inserted before the header.
+    int modulo = (fpos + header_size) % data_alignment;
+    if (modulo != 0) {
+      writer.pad_bytes(data_alignment - modulo);
+      fpos += (data_alignment - modulo);
+    }
   }
 
   _header_start = fpos;

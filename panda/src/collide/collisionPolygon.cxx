@@ -439,7 +439,7 @@ test_intersection_from_sphere(const CollisionEntry &entry) const {
       // also compute the actual contact point and time of contact for
       // handlers that need it
       actual_t = ((dist_to_p - from_radius) / -dot);
-      actual_t = min((PN_stdfloat)1.0, max((PN_stdfloat)0.0, actual_t));
+      actual_t = std::clamp(actual_t, (PN_stdfloat)0.0, (PN_stdfloat)1.0);
       contact_point = a + (actual_t * delta);
 
       if (t >= 1.0f) {
@@ -584,7 +584,8 @@ test_intersection_from_line(const CollisionEntry &entry) const {
   const CollisionLine *line;
   DCAST_INTO_R(line, entry.get_from(), nullptr);
 
-  const LMatrix4 &wrt_mat = entry.get_wrt_mat();
+  CPT(TransformState) wrt_space = entry.get_wrt_space();
+  const LMatrix4 &wrt_mat = wrt_space->get_mat();
 
   LPoint3 from_origin = line->get_origin() * wrt_mat;
   LVector3 from_direction = line->get_direction() * wrt_mat;
@@ -652,7 +653,8 @@ test_intersection_from_ray(const CollisionEntry &entry) const {
   const CollisionRay *ray;
   DCAST_INTO_R(ray, entry.get_from(), nullptr);
 
-  const LMatrix4 &wrt_mat = entry.get_wrt_mat();
+  CPT(TransformState) wrt_space = entry.get_wrt_space();
+  const LMatrix4 &wrt_mat = wrt_space->get_mat();
 
   LPoint3 from_origin = ray->get_origin() * wrt_mat;
   LVector3 from_direction = ray->get_direction() * wrt_mat;
@@ -725,7 +727,8 @@ test_intersection_from_segment(const CollisionEntry &entry) const {
   const CollisionSegment *segment;
   DCAST_INTO_R(segment, entry.get_from(), nullptr);
 
-  const LMatrix4 &wrt_mat = entry.get_wrt_mat();
+  CPT(TransformState) wrt_space = entry.get_wrt_space();
+  const LMatrix4 &wrt_mat = wrt_space->get_mat();
 
   LPoint3 from_a = segment->get_point_a() * wrt_mat;
   LPoint3 from_b = segment->get_point_b() * wrt_mat;
@@ -896,7 +899,7 @@ test_intersection_from_capsule(const CollisionEntry &entry) const {
     LVector2 pv = p2 - p1;
     if (is_right(v, pv)) {
       PN_stdfloat t = v.dot(pv) / pv.length_squared();
-      t = max(min(t, (PN_stdfloat)1), (PN_stdfloat)0);
+      t = std::clamp(t, (PN_stdfloat)0, (PN_stdfloat)1);
 
       LPoint2 p = p1 + pv * t;
       PN_stdfloat d = (p - intersect_2d).length_squared();
@@ -913,7 +916,7 @@ test_intersection_from_capsule(const CollisionEntry &entry) const {
   LVector3 from_v = from_b - from_a;
 
   PN_stdfloat t = (closest_p_3d - from_a).dot(from_v) / from_v.length_squared();
-  LPoint3 ref_point_3d = from_a + from_v * max(min(t, (PN_stdfloat)1), (PN_stdfloat)0);
+  LPoint3 ref_point_3d = from_a + from_v * std::clamp(t, (PN_stdfloat)0, (PN_stdfloat)1);
 
   // Okay, now we have a point to apply the sphere test on.
 
@@ -944,7 +947,7 @@ test_intersection_from_capsule(const CollisionEntry &entry) const {
     LVector2 pv = p2 - p1;
     if (is_right(v, pv)) {
       PN_stdfloat t = v.dot(pv) / pv.length_squared();
-      t = max(min(t, (PN_stdfloat)1), (PN_stdfloat)0);
+      t = std::clamp(t, (PN_stdfloat)0, (PN_stdfloat)1);
 
       LPoint2 p = p1 + pv * t;
       PN_stdfloat d = (p - ref_point_2d).length_squared();
@@ -1007,7 +1010,7 @@ test_intersection_from_capsule(const CollisionEntry &entry) const {
       LVector2 pv = p2 - p1;
       if (is_right(v, pv)) {
         PN_stdfloat t = v.dot(pv) / pv.length_squared();
-        t = max(min(t, (PN_stdfloat)1), (PN_stdfloat)0);
+        t = std::clamp(t, (PN_stdfloat)0, (PN_stdfloat)1);
 
         LPoint2 p = p1 + pv * t;
         PN_stdfloat d = (p - deepest_2d).length_squared();
@@ -1047,7 +1050,8 @@ test_intersection_from_parabola(const CollisionEntry &entry) const {
   const CollisionParabola *parabola;
   DCAST_INTO_R(parabola, entry.get_from(), nullptr);
 
-  const LMatrix4 &wrt_mat = entry.get_wrt_mat();
+  CPT(TransformState) wrt_space = entry.get_wrt_space();
+  const LMatrix4 &wrt_mat = wrt_space->get_mat();
 
   // Convert the parabola into local coordinate space.
   LParabola local_p(parabola->get_parabola());

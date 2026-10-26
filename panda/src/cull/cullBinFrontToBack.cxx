@@ -24,24 +24,12 @@
 TypeHandle CullBinFrontToBack::_type_handle;
 
 /**
- *
- */
-CullBinFrontToBack::
-~CullBinFrontToBack() {
-  Objects::iterator oi;
-  for (oi = _objects.begin(); oi != _objects.end(); ++oi) {
-    CullableObject *object = (*oi)._object;
-    delete object;
-  }
-}
-
-/**
  * Factory constructor for passing to the CullBinManager.
  */
 CullBin *CullBinFrontToBack::
-make_bin(const std::string &name, GraphicsStateGuardianBase *gsg,
+make_bin(std::string name, GraphicsStateGuardianBase *gsg,
          const PStatCollector &draw_region_pcollector) {
-  return new CullBinFrontToBack(name, gsg, draw_region_pcollector);
+  return new CullBinFrontToBack(std::move(name), gsg, draw_region_pcollector);
 }
 
 /**
@@ -52,7 +40,7 @@ add_object(CullableObject *object, Thread *current_thread) {
   // Determine the center of the bounding volume.
   CPT(BoundingVolume) volume = object->_geom->get_bounds();
   if (volume->is_empty()) {
-    delete object;
+    // No point in culling objects with no volume.
     return;
   }
 

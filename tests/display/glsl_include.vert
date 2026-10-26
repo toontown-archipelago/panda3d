@@ -1,8 +1,9 @@
-#version 150
+#version 330
 
-#pragma include "glsl_include_inputs.glsl"
+#extension GL_GOOGLE_include_directive : require
 
-// Vertex inputs
+#include "glsl_include_inputs.glsl"
+
 in vec4 p3d_Vertex;
 
 void main() {

@@ -15,9 +15,11 @@
 
 /**
  * Return the Shader's filename for the given shader type.
+ *
+ * @deprecated Access the filename of the individual modules instead.
  */
 INLINE Filename Shader::
-get_filename(ShaderType type) const {
+get_filename(DeprecatedShaderType type) const {
   if (_filename._separate && type != ST_none) {
     switch (type) {
       case ST_vertex:
@@ -53,9 +55,11 @@ get_filename(ShaderType type) const {
 /**
  * Sets the Shader's filename for the given shader type.  Useful for
  * associating a shader created with Shader.make with a name for diagnostics.
+ *
+ * @deprecated Access the filename of the individual modules instead.
  */
 INLINE void Shader::
-set_filename(ShaderType type, const Filename &filename) {
+set_filename(DeprecatedShaderType type, const Filename &filename) {
   _filename._separate = true;
   switch (type) {
   case ST_vertex:
@@ -84,9 +88,11 @@ set_filename(ShaderType type, const Filename &filename) {
 
 /**
  * Return the Shader's text for the given shader type.
+ *
+ * @deprecated
  */
 INLINE const std::string &Shader::
-get_text(ShaderType type) const {
+get_text(DeprecatedShaderType type) const {
   if (_text._separate) {
     nassertr(type != ST_none || !_text._shared.empty(), _text._shared);
     switch (type) {
@@ -128,9 +134,18 @@ get_error_flag() const {
 /**
  * Returns the shader language in which this shader was written.
  */
-INLINE Shader::ShaderLanguage Shader::
+INLINE Shader::SourceLanguage Shader::
 get_language() const {
   return _language;
+}
+
+/**
+ * Returns a mask indicating which capabilities this shader needs to function
+ * optimally.
+ */
+INLINE uint64_t Shader::
+get_used_capabilities() const {
+  return _used_caps;
 }
 
 /**
@@ -152,52 +167,82 @@ get_fullpath() const {
 }
 
 /**
- * Returns the setting of the cache_compiled_shader flag.  See
- * set_cache_compiled_shader().
+ * Returns true if the shader has the given stage.
  */
 INLINE bool Shader::
-get_cache_compiled_shader() const {
-  return _cache_compiled_shader;
+has_stage(Stage stage) const {
+  return (_module_mask & (1u << (uint32_t)stage)) != 0;
 }
 
 /**
- * Sets the cache_compiled_shader flag.  When this is set, the next time the
- * Shader is loaded on a GSG, it will automatically extract the compiled
- * shader from the GSG and save it to the global BamCache.
- *
- * This is used to store compiled shaders in the BamCache.  This flag should
- * not be set explicitly; it is set automatically by the ShaderPool when
- * model-cache-compiled-shaders is set true.
+ * Returns the module for the given stage, or null if this stage isn't here.
  */
-INLINE void Shader::
-set_cache_compiled_shader(bool flag) {
-  _cache_compiled_shader = flag;
-}
-
-/**
- *
- */
-INLINE Shader::ShaderCaps::
-ShaderCaps() {
-  clear();
-}
-
-/**
- *
- */
-INLINE bool Shader::ShaderCaps::
-operator == (const ShaderCaps &other) const {
-#ifdef HAVE_CG
-  if ((_active_vprofile != other._active_vprofile) ||
-      (_active_fprofile != other._active_fprofile) ||
-      (_active_gprofile != other._active_gprofile) ||
-      (_ultimate_vprofile != other._ultimate_vprofile) ||
-      (_ultimate_fprofile != other._ultimate_fprofile) ||
-      (_ultimate_gprofile != other._ultimate_gprofile)) {
-     return false;
+INLINE CPT(ShaderModule) Shader::
+get_module(Stage stage) const {
+  if (has_stage(stage)) {
+    size_t index = ::count_bits_in_word(((1u << (uint32_t)stage) - 1) & _module_mask);
+    CPT(ShaderModule) module = _modules[index]._module.get_read_pointer();
+    nassertr(module->get_stage() == stage, nullptr);
+    return module;
   }
-#endif
-  return true;
+  return nullptr;
+}
+
+/**
+ * Returns the module for the given stage, or null if this stage isn't here.
+ */
+INLINE PT(ShaderModule) Shader::
+modify_module(Stage stage) {
+  if (has_stage(stage)) {
+    size_t index = ::count_bits_in_word(((1u << (uint32_t)stage) - 1) & _module_mask);
+    PT(ShaderModule) module = _modules[index]._module.get_write_pointer();
+    nassertr(module->get_stage() == stage, nullptr);
+    return module;
+  }
+  return nullptr;
+}
+
+/**
+ * Sets a boolean value for the specialization constant with the indicated
+ * name.  All modules containing a specialization constant with this name
+ * will be given this value.
+ *
+ * Returns true if there was a specialization constant with this name on any of
+ * the modules, false otherwise.
+ */
+INLINE bool Shader::
+set_constant(CPT_InternalName name, bool value) {
+  return set_constant(name, (uint32_t)value);
+}
+
+/**
+ * Sets an integer value for the specialization constant with the indicated
+ * name.  All modules containing a specialization constant with this name
+ * will be given this value.
+ *
+ * Returns true if there was a specialization constant with this name on any of
+ * the modules, false otherwise.
+ */
+INLINE bool Shader::
+set_constant(CPT_InternalName name, int value) {
+  uint32_t val;
+  *((int *)&val) = value;
+  return set_constant(name, val);
+}
+
+/**
+ * Sets a float value for the specialization constant with the indicated
+ * name.  All modules containing a specialization constant with this name
+ * will be given this value.
+ *
+ * Returns true if there was a specialization constant with this name on any of
+ * the modules, false otherwise.
+ */
+INLINE bool Shader::
+set_constant(CPT_InternalName name, float value) {
+  uint32_t val;
+  *((float *)&val) = value;
+  return set_constant(name, val);
 }
 
 /**
@@ -206,7 +251,7 @@ operator == (const ShaderCaps &other) const {
 INLINE Shader::ShaderPtrData::
 ShaderPtrData() :
   _ptr(nullptr),
-  _type(SPT_unknown),
+  _type(ScalarType::ST_unknown),
   _updated(true),
   _size(0)
 {
@@ -219,7 +264,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_float &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(ptr.size())
 {
@@ -232,7 +277,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LMatrix4f &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(ptr.size() * 16)
 {
@@ -245,7 +290,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LMatrix3f &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(ptr.size() * 9)
 {
@@ -258,7 +303,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LVecBase4f &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(ptr.size() * 4)
 {
@@ -271,7 +316,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LVecBase3f &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(ptr.size() * 3)
 {
@@ -284,7 +329,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LVecBase2f &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(ptr.size() * 2)
 {
@@ -295,7 +340,7 @@ ShaderPtrData(const PTA_LVecBase2f &ptr):
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LVecBase4f &vec) :
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(4)
 {
@@ -311,7 +356,7 @@ ShaderPtrData(const LVecBase4f &vec) :
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LVecBase3f &vec) :
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(3)
 {
@@ -327,7 +372,7 @@ ShaderPtrData(const LVecBase3f &vec) :
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LVecBase2f &vec) :
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(2)
 {
@@ -343,7 +388,7 @@ ShaderPtrData(const LVecBase2f &vec) :
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LMatrix4f &mat) :
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(16)
 {
@@ -359,7 +404,7 @@ ShaderPtrData(const LMatrix4f &mat) :
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LMatrix3f &mat) :
-  _type(SPT_float),
+  _type(ScalarType::ST_float),
   _updated(true),
   _size(9)
 {
@@ -377,7 +422,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_double &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(ptr.size())
 {
@@ -390,7 +435,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LMatrix4d &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(ptr.size() * 16)
 {
@@ -403,7 +448,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LMatrix3d &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(ptr.size() * 9)
 {
@@ -416,7 +461,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LVecBase4d &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(ptr.size() * 4)
 {
@@ -429,7 +474,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LVecBase3d &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(ptr.size() * 3)
 {
@@ -442,7 +487,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LVecBase2d &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(ptr.size() * 2)
 {
@@ -453,7 +498,7 @@ ShaderPtrData(const PTA_LVecBase2d &ptr):
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LVecBase4d &vec) :
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(4)
 {
@@ -469,7 +514,7 @@ ShaderPtrData(const LVecBase4d &vec) :
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LVecBase3d &vec) :
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(3)
 {
@@ -485,7 +530,7 @@ ShaderPtrData(const LVecBase3d &vec) :
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LVecBase2d &vec) :
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(2)
 {
@@ -501,7 +546,7 @@ ShaderPtrData(const LVecBase2d &vec) :
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LMatrix4d &mat) :
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(16)
 {
@@ -517,7 +562,7 @@ ShaderPtrData(const LMatrix4d &mat) :
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LMatrix3d &mat) :
-  _type(SPT_double),
+  _type(ScalarType::ST_double),
   _updated(true),
   _size(9)
 {
@@ -535,7 +580,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_int &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_int),
+  _type(ScalarType::ST_int),
   _updated(true),
   _size(ptr.size())
 {
@@ -548,7 +593,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LVecBase4i &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_int),
+  _type(ScalarType::ST_int),
   _updated(true),
   _size(ptr.size() * 4)
 {
@@ -561,7 +606,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LVecBase3i &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_int),
+  _type(ScalarType::ST_int),
   _updated(true),
   _size(ptr.size() * 3)
 {
@@ -574,7 +619,7 @@ INLINE Shader::ShaderPtrData::
 ShaderPtrData(const PTA_LVecBase2i &ptr):
   _pta(ptr.v0()),
   _ptr(ptr.p()),
-  _type(SPT_int),
+  _type(ScalarType::ST_int),
   _updated(true),
   _size(ptr.size() * 2)
 {
@@ -585,7 +630,7 @@ ShaderPtrData(const PTA_LVecBase2i &ptr):
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LVecBase4i &vec) :
-  _type(SPT_int),
+  _type(ScalarType::ST_int),
   _updated(true),
   _size(4)
 {
@@ -601,7 +646,7 @@ ShaderPtrData(const LVecBase4i &vec) :
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LVecBase3i &vec) :
-  _type(SPT_int),
+  _type(ScalarType::ST_int),
   _updated(true),
   _size(3)
 {
@@ -617,7 +662,7 @@ ShaderPtrData(const LVecBase3i &vec) :
  */
 INLINE Shader::ShaderPtrData::
 ShaderPtrData(const LVecBase2i &vec) :
-  _type(SPT_int),
+  _type(ScalarType::ST_int),
   _updated(true),
   _size(2)
 {
@@ -637,18 +682,19 @@ write_datagram(Datagram &dg) const {
   dg.add_uint8(_type);
   dg.add_uint32((uint32_t)_size);
 
-  if (_type == SPT_double) {
+  if (_type == ScalarType::ST_double) {
     const double *data = (const double *) _ptr;
     for (size_t i = 0; i < _size; ++i) {
       dg.add_float64(data[i]);
     }
-
-  } else if (_type == SPT_float) {
+  }
+  else if (_type == ScalarType::ST_float) {
     const float *data = (const float *) _ptr;
     for (size_t i = 0; i < _size; ++i) {
       dg.add_float32(data[i]);
     }
-  } else if (_type == SPT_int) {
+  }
+  else if (_type == ScalarType::ST_int) {
     const int *data = (const int *) _ptr;
     for (size_t i = 0; i < _size; ++i) {
       dg.add_int32(data[i]);
@@ -661,10 +707,10 @@ write_datagram(Datagram &dg) const {
  */
 INLINE void Shader::ShaderPtrData::
 read_datagram(DatagramIterator &scan) {
-  _type = (ShaderPtrType) scan.get_uint8();
+  _type = (ShaderType::ScalarType) scan.get_uint8();
   _size = scan.get_uint32();
 
-  if (_type == SPT_double) {
+  if (_type == ScalarType::ST_double) {
     PTA_double pta = PTA_double::empty_array(_size);
     for (size_t i = 0; i < _size; ++i) {
       pta[i] = scan.get_float64();
@@ -672,7 +718,7 @@ read_datagram(DatagramIterator &scan) {
     _pta = pta.v0();
     _ptr = pta.p();
 
-  } else if (_type == SPT_float) {
+  } else if (_type == ScalarType::ST_float) {
     PTA_float pta = PTA_float::empty_array(_size);
     for (size_t i = 0; i < _size; ++i) {
       pta[i] = scan.get_float32();
@@ -680,7 +726,7 @@ read_datagram(DatagramIterator &scan) {
     _pta = pta.v0();
     _ptr = pta.p();
 
-  } else if (_type == SPT_int) {
+  } else if (_type == ScalarType::ST_int) {
     PTA_int pta = PTA_int::empty_array(_size);
     for (size_t i = 0; i < _size; ++i) {
       pta[i] = scan.get_int32();
@@ -713,6 +759,29 @@ ShaderFile(std::string vertex, std::string fragment, std::string geometry,
   _tess_control(std::move(tess_control)),
   _tess_evaluation(std::move(tess_evaluation))
 {
+}
+
+/**
+ *
+ */
+INLINE const std::string &Shader::ShaderFile::
+get_stage(Shader::Stage stage) const {
+  switch (stage) {
+  case Stage::VERTEX:
+    return _vertex;
+  case Stage::FRAGMENT:
+    return _fragment;
+  case Stage::GEOMETRY:
+    return _geometry;
+  case Stage::TESS_CONTROL:
+    return _tess_control;
+  case Stage::TESS_EVALUATION:
+    return _tess_evaluation;
+  case Stage::COMPUTE:
+    return _compute;
+  }
+
+  return _shared;
 }
 
 /**
@@ -791,6 +860,30 @@ operator < (const Shader::ShaderFile &other) const {
 }
 
 /**
+ * Sets an external value for the specialization constant with the given ID.
+ *
+ * Returns true if the value is different from what was already in there, false
+ * otherwise.
+ */
+INLINE bool Shader::ModuleSpecConstants::
+set_constant(uint32_t id, uint32_t value) {
+  auto it = std::find(_indices.begin(), _indices.end(), id);
+  if (it == _indices.end()) {
+    _indices.push_back(id);
+    _values.push_back(value);
+    return true;
+
+  } else {
+    size_t loc = it - _indices.begin();
+    if (_values[loc] != value) {
+      _values[loc] = value;
+      return true;
+    }
+    return false;
+  }
+}
+
+/**
  * Returns a PStatCollector for timing the preparation of just this shader.
  */
 INLINE PStatCollector &Shader::
@@ -804,4 +897,78 @@ get_prepare_shader_pcollector() {
 INLINE const std::string &Shader::
 get_debug_name() const {
   return _debug_name;
+}
+
+/**
+ *
+ */
+INLINE void Shader::DebugInfo::
+operator = (const DebugInfo &info) {
+  _strings = info._strings;
+  _asserts = info._asserts;
+  _assert_count = info._assert_count;
+}
+
+/**
+ * Returns true if there is no debug information present.
+ */
+INLINE bool Shader::DebugInfo::
+empty() const {
+  LightMutexHolder holder(_lock);
+  return _strings.get_num_entries() == 0 && _asserts.empty();
+}
+
+/**
+ * Returns the absolute minimum required size for the buffer.
+ */
+INLINE size_t Shader::DebugInfo::
+get_min_buffer_size() const {
+  LightMutexHolder holder(_lock);
+  return sizeof(uint32_t) * (1 + (size_t)_assert_count * 4);
+}
+
+/**
+ * Returns the number of strings printed by the shader.
+ */
+INLINE size_t Shader::DebugInfo::
+get_num_strings() const {
+  LightMutexHolder holder(_lock);
+  return _strings.get_num_entries();
+}
+
+/**
+ * Returns the string with the given index printed by the shader.
+ */
+INLINE const std::string &Shader::DebugInfo::
+get_string(size_t i) const {
+  LightMutexHolder holder(_lock);
+  return _strings.get_key(i);
+}
+
+/**
+ * Ensures that the given string is defined in the string table, and returns
+ * its index.
+ */
+INLINE size_t Shader::DebugInfo::
+intern_string(const std::string &str) {
+  LightMutexHolder holder(_lock);
+  return _strings.store(str, nullptr);
+}
+
+/**
+ * Returns the maximum number of assertions used across all shaders.
+ */
+INLINE size_t Shader::DebugInfo::
+get_max_num_asserts() const {
+  return _assert_count;
+}
+
+/**
+ * Reserves space for the given number of assertions.  This must be set before
+ * SpirVDebugOutputPass may register assertions using add_assert, since the
+ * assertions live in a fixed-size section at the start of the debug buffer.
+ */
+INLINE void Shader::DebugInfo::
+set_max_num_asserts(size_t count) {
+  _assert_count = (uint32_t)count;
 }

@@ -27,13 +27,13 @@ TypeHandle glxGraphicsBuffer::_type_handle;
  */
 glxGraphicsBuffer::
 glxGraphicsBuffer(GraphicsEngine *engine, GraphicsPipe *pipe,
-                  const std::string &name,
+                  std::string name,
                   const FrameBufferProperties &fb_prop,
                   const WindowProperties &win_prop,
                   int flags,
                   GraphicsStateGuardian *gsg,
                   GraphicsOutput *host) :
-  GraphicsBuffer(engine, pipe, name, fb_prop, win_prop, flags, gsg, host)
+  GraphicsBuffer(engine, pipe, std::move(name), fb_prop, win_prop, flags, gsg, host)
 {
   glxGraphicsPipe *glx_pipe;
   DCAST_INTO_V(glx_pipe, _pipe);
@@ -166,7 +166,8 @@ open_buffer() {
     // with the old gsg.
     DCAST_INTO_R(glxgsg, _gsg, false);
 
-    if (!glxgsg->_context_has_pbuffer ||
+    if (glxgsg->get_engine() != _engine ||
+        !glxgsg->_context_has_pbuffer ||
         !glxgsg->get_fb_properties().subsumes(_fb_properties)) {
       // We need a new pixel format, and hence a new GSG.
       glxgsg = new glxGraphicsStateGuardian(_engine, _pipe, glxgsg);

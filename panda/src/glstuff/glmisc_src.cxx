@@ -22,11 +22,26 @@ ConfigVariableBool gl_forward_compatible
    PRC_DESC("Setting this to true will request a forward-compatible OpenGL "
             "context, which will not support the fixed-function pipeline."));
 
+ConfigVariableBool gl_support_dsa
+  ("gl-support-dsa", true,
+   PRC_DESC("Configure this false if you suspect your GL's implementation of "
+            "Direct State Access is broken."));
+
 ConfigVariableBool gl_support_fbo
   ("gl-support-fbo", true,
    PRC_DESC("Configure this false if your GL's implementation of "
             "EXT_framebuffer_object is broken.  The system might still be "
             "able to create buffers using pbuffers or the like."));
+
+ConfigVariableBool gl_support_spirv
+  ("gl-support-spirv", true,
+   PRC_DESC("True to use the graphics driver's support for SPIR-V shaders if "
+            "available, false to transpile all SPIR-V shaders to GLSL first."));
+
+ConfigVariableInt gl_force_glsl_version
+  ("gl-force-glsl-version", "",
+   PRC_DESC("Set this to force the use of a specific GLSL version when "
+            "cross-compiling a SPIR-V shader to GLSL."));
 
 ConfigVariableBool gl_cheap_textures
   ("gl-cheap-textures", false,
@@ -239,7 +254,11 @@ ConfigVariableBool gl_dump_compiled_shaders
             "into the current directory."));
 
 ConfigVariableBool gl_validate_shaders
+#ifdef NDEBUG
+  ("gl-validate-shaders", false,
+#else
   ("gl-validate-shaders", true,
+#endif
    PRC_DESC("Set this to true to enable glValidateShader the first time "
             "a shader is bound.  This may cause helpful information about "
             "shaders to be printed."));
@@ -321,6 +340,19 @@ ConfigVariableBool gl_depth_zero_to_one
             "range from 0 to 1, matching other graphics APIs.  This setting "
             "requires OpenGL 4.5, or NVIDIA GeForce 8+ hardware."));
 
+ConfigVariableInt gl_texture_transfer_num_threads
+ ("gl-texture-transfer-num-threads", 2,
+  PRC_DESC("The number of threads that will be started to upload and download "
+           "texture data asynchronously, either via the setup_async_transfer "
+           "interface on the the Texture class or via the async screenshot "
+           "interface."));
+
+ConfigVariableEnum<ThreadPriority> gl_texture_transfer_thread_priority
+ ("gl-texture-transfer-thread-priority", TP_normal,
+  PRC_DESC("The default thread priority to assign to the threads created for "
+           "asynchronous texture transfers.  The default is 'normal'; you may "
+           "also specify 'low', 'high', or 'urgent'."));
+
 extern ConfigVariableBool gl_parallel_arrays;
 
 void CLP(init_classes)() {
@@ -330,9 +362,6 @@ void CLP(init_classes)() {
   CLP(IndexBufferContext)::init_type();
 #ifndef OPENGLES_1
   CLP(ShaderContext)::init_type();
-#endif
-#if defined(HAVE_CG) && !defined(OPENGLES)
-  CLP(CgShaderContext)::init_type();
 #endif
   CLP(TextureContext)::init_type();
 #ifndef OPENGLES

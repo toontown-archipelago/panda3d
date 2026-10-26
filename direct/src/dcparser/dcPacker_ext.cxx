@@ -136,6 +136,7 @@ pack_object(PyObject *object) {
       // The supplied object is not an instance of the expected class object,
       // but it is a sequence.  This is case (2).
       _this->push();
+      Py_BEGIN_CRITICAL_SECTION(object);
       int size = PySequence_Size(object);
       for (int i = 0; i < size; ++i) {
         PyObject *element = PySequence_GetItem(object, i);
@@ -146,6 +147,7 @@ pack_object(PyObject *object) {
           std::cerr << "Unable to extract item " << i << " from sequence.\n";
         }
       }
+      Py_END_CRITICAL_SECTION();
       _this->pop();
     } else {
       // The supplied object is not a sequence, and we weren't expecting a
@@ -250,10 +252,9 @@ unpack_object() {
         }
       }
     }
-    // Fall through (if no constructor)
-
     // If we don't know what kind of class object it is, or it doesn't have a
     // constructor, fall through and make a tuple.
+    [[fallthrough]];
   default:
     {
       // First, build up a list from the nested objects.

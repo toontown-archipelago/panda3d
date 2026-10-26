@@ -78,6 +78,21 @@ glxGraphicsStateGuardian::
 }
 
 /**
+ * Attempts to make the context current on this thread without an associated
+ * window, if possible.  Returns false if that is not supported.
+ */
+bool glxGraphicsStateGuardian::
+make_current() const {
+  if (glXGetCurrentContext() == _context) {
+    return true;
+  }
+
+  return _context != nullptr
+      && is_at_least_gl_version(3, 0)
+      && glXMakeCurrent(_display, None, _context);
+}
+
+/**
  * Gets the FrameBufferProperties to match the indicated visual.
  */
 void glxGraphicsStateGuardian::
@@ -402,6 +417,7 @@ choose_pixel_format(const FrameBufferProperties &properties,
             << ", context_has_pixmap = " << _context_has_pixmap << "\n";
         }
 
+        XFree(configs);
         return;
       }
     }
@@ -412,6 +428,10 @@ choose_pixel_format(const FrameBufferProperties &properties,
     _context = nullptr;
     _visual = nullptr;
     _visuals = nullptr;
+  }
+
+  if (configs != nullptr) {
+    XFree(configs);
   }
 
   glxdisplay_cat.warning()
@@ -715,7 +735,7 @@ query_glx_extensions() {
  * Outputs the result of glxGetClientString() on the indicated tag.
  */
 void glxGraphicsStateGuardian::
-show_glx_client_string(const string &name, int id) {
+show_glx_client_string(std::string_view name, int id) {
   if (glgsg_cat.is_debug()) {
     const char *text = glXGetClientString(_display, id);
     if (text == nullptr) {
@@ -732,7 +752,7 @@ show_glx_client_string(const string &name, int id) {
  * Outputs the result of glxQueryServerString() on the indicated tag.
  */
 void glxGraphicsStateGuardian::
-show_glx_server_string(const string &name, int id) {
+show_glx_server_string(std::string_view name, int id) {
   if (glgsg_cat.is_debug()) {
     const char *text = glXQueryServerString(_display, _screen, id);
     if (text == nullptr) {

@@ -72,6 +72,7 @@ DynamicTextFont(const Filename &font_filename, int face_index) {
   _has_outline = false;
   _tex_format = Texture::F_alpha;
   _needs_image_processing = false;
+  ++_modified;
 }
 
 /**
@@ -94,6 +95,7 @@ DynamicTextFont(const char *font_data, int data_length, int face_index) {
   _has_outline = false;
   _tex_format = Texture::F_alpha;
   _needs_image_processing = false;
+  ++_modified;
 }
 
 /**
@@ -141,6 +143,32 @@ DynamicTextFont::
 PT(TextFont) DynamicTextFont::
 make_copy() const {
   return new DynamicTextFont(*this);
+}
+
+/**
+ * Reads a new font face from disk, replacing the existing loaded font.
+ * If the font could not be loaded, returns false, and it may be left in an
+ * invalid state.
+ */
+bool DynamicTextFont::
+read(const Filename &font_filename, int face_index) {
+  clear();
+
+  _is_valid = load_font(font_filename, face_index);
+  TextFont::set_name(FreetypeFont::get_name());
+  TextFont::_line_height = FreetypeFont::get_line_height();
+  TextFont::_space_advance = FreetypeFont::get_space_advance();
+
+  _fg.set(1.0f, 1.0f, 1.0f, 1.0f);
+  _bg.set(1.0f, 1.0f, 1.0f, 0.0f);
+  _outline_color.set(1.0f, 1.0f, 1.0f, 0.0f);
+  _outline_width = 0.0f;
+  _outline_feather = 0.0f;
+  _has_outline = false;
+  _tex_format = Texture::F_alpha;
+  _needs_image_processing = false;
+  ++_modified;
+  return _is_valid;
 }
 
 /**
@@ -411,6 +439,7 @@ update_filters() {
     page->set_magfilter(_magfilter);
     page->set_anisotropic_degree(_anisotropic_degree);
   }
+  ++_modified;
 }
 
 /**
@@ -566,7 +595,7 @@ make_glyph(int character, FT_Face face, int glyph_index) {
   if (_render_mode == RM_texture) {
     // Render the glyph if necessary.
     if (slot->format != ft_glyph_format_bitmap) {
-      FT_Render_Glyph(slot, ft_render_mode_normal);
+      FT_Render_Glyph(slot, _native_antialias ? ft_render_mode_normal : ft_render_mode_mono);
     }
 
     tex_x_size = bitmap.width;

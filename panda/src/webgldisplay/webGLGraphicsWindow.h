@@ -28,7 +28,7 @@
 class WebGLGraphicsWindow : public GraphicsWindow {
 public:
   WebGLGraphicsWindow(GraphicsEngine *engine, GraphicsPipe *pipe,
-                      const std::string &name,
+                      std::string name,
                       const FrameBufferProperties &fb_prop,
                       const WindowProperties &win_prop,
                       int flags,
@@ -47,6 +47,9 @@ public:
 protected:
   virtual void close_window();
   virtual bool open_window();
+
+public:
+  void on_resize(double width, double height);
 
 private:
   static EM_BOOL on_fullscreen_event(int type, const EmscriptenFullscreenChangeEvent *event, void *user_data);

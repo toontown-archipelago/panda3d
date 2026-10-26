@@ -52,6 +52,8 @@
 #include "samplerState.h"
 #include "shader.h"
 #include "shaderContext.h"
+#include "shaderModule.h"
+#include "shaderType.h"
 #include "transformBlend.h"
 #include "transformBlendTable.h"
 #include "transformTable.h"
@@ -210,7 +212,7 @@ ConfigVariableBool singular_points
           "don't want the points to appear repeatedly."));
 
 ConfigVariableBool matrix_palette
-("matrix-palette", false,
+("matrix-palette", true,
  PRC_DESC("Set this true to allow the use of the matrix palette when "
           "animating vertices in hardware.  The matrix palette is "
           "not supported by all devices, but if it is, using "
@@ -218,9 +220,7 @@ ConfigVariableBool matrix_palette
           "in hardware, and it can also improve the "
           "performance of animating some simpler meshes.  Without "
           "this option, certain meshes will have to be animated in "
-          "software.  However, this option is not enabled by default, "
-          "because its support seems to be buggy in certain drivers "
-          "(ATI FireGL T2 8.103 in particular.)"));
+          "software."));
 
 ConfigVariableBool display_list_animation
 ("display-list-animation", false,
@@ -256,8 +256,11 @@ ConfigVariableBool dump_generated_shaders
 
 ConfigVariableBool cache_generated_shaders
 ("cache-generated-shaders", true,
- PRC_DESC("Set this true to cause all generated shaders to be cached in "
-          "memory.  This is useful to prevent unnecessary recompilation."));
+ PRC_DESC("Set this true to cause all shaders created from strings, such "
+          "as by the shader generator, to be cached in memory and (subject "
+          "to model-cache-shaders) on disk.  This is useful to "
+          "prevent unnecessary recompilation.  Set this false to disable all "
+          "caching of such shaders."));
 
 ConfigVariableBool vertices_float64
 ("vertices-float64", false,
@@ -543,38 +546,6 @@ ConfigVariableBool stereo_lens_old_convergence
           "old, incorrect behavior, this may be set to 'true' to switch "
           "back to the old calculation."));
 
-ConfigVariableBool basic_shaders_only
-("basic-shaders-only", false,
- PRC_DESC("Set this to true if you aren't interested in shader model three "
-          "and beyond.  Setting this flag will cause panda to disable "
-          "bleeding-edge shader functionality which tends to be unreliable "
-          "or broken.  At some point, when functionality that is currently "
-          "flaky becomes reliable, we may expand the definition of what "
-          "constitutes 'basic' shaders."));
-
-ConfigVariableString cg_glsl_version
-("cg-glsl-version", "",
- PRC_DESC("If this is set, it forces the Cg compiler to generate GLSL "
-          "code conforming to the given GLSL version when using the "
-          "glslv, glslf or glslg profiles.  Use this when you are having "
-          "problems with these profiles.  Example values are 120 or 150."));
-
-ConfigVariableBool glsl_preprocess
-("glsl-preprocess", true,
- PRC_DESC("If this is enabled, Panda looks for lines starting with "
-          "#pragma include when loading a GLSL shader and processes "
-          "it appropriately.  This can be useful if you have code that "
-          "is shared between multiple shaders.  Set this to false if "
-          "you have no need for this feature or if you do your own "
-          "preprocessing of GLSL shaders."));
-
-ConfigVariableInt glsl_include_recursion_limit
-("glsl-include-recursion-limit", 10,
- PRC_DESC("This sets a limit on how many nested #pragma include "
-          "directives that Panda will follow when glsl-preprocess is "
-          "enabled.  This is used to prevent infinite recursion when "
-          "two shader files include each other."));
-
 ConfigureFn(config_gobj) {
   AnimateVerticesRequest::init_type();
   BufferContext::init_type();
@@ -617,8 +588,10 @@ ConfigureFn(config_gobj) {
   QueryContext::init_type();
   SamplerContext::init_type();
   SamplerState::init_type();
-  ShaderContext::init_type();
   Shader::init_type();
+  ShaderContext::init_type();
+  ShaderModule::init_type();
+  ShaderType::init_type();
   SliderTable::init_type();
   Texture::init_type();
   TextureContext::init_type();
@@ -663,6 +636,7 @@ ConfigureFn(config_gobj) {
   ParamTextureSampler::register_with_read_factory();
   PerspectiveLens::register_with_read_factory();
   Shader::register_with_read_factory();
+  ShaderType::register_with_read_factory();
   SliderTable::register_with_read_factory();
   Texture::register_with_read_factory();
   TextureStage::register_with_read_factory();

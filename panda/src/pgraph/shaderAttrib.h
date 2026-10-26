@@ -38,6 +38,7 @@
  */
 class EXPCL_PANDA_PGRAPH ShaderAttrib final : public RenderAttrib {
 private:
+  friend class StaticObject<ShaderAttrib>;
   INLINE ShaderAttrib();
   INLINE ShaderAttrib(const ShaderAttrib &copy);
 
@@ -105,7 +106,7 @@ PUBLISHED:
   CPT(RenderAttrib) clear_flag(int flag) const;
 
   CPT(RenderAttrib) clear_shader_input(const InternalName *id) const;
-  CPT(RenderAttrib) clear_shader_input(const std::string &id) const;
+  CPT(RenderAttrib) clear_shader_input(std::string_view id) const;
 
   CPT(RenderAttrib) clear_all_shader_inputs() const;
 
@@ -114,17 +115,17 @@ PUBLISHED:
 
   const Shader *get_shader() const;
   const ShaderInput &get_shader_input(const InternalName *id) const;
-  const ShaderInput &get_shader_input(const std::string &id) const;
+  const ShaderInput &get_shader_input(std::string_view id) const;
 
   NodePath get_shader_input_nodepath(const InternalName *id) const;
-  LVecBase4 get_shader_input_vector(InternalName *id) const;
+  LVecBase4 get_shader_input_vector(const InternalName *id) const;
   Texture *get_shader_input_texture(const InternalName *id, SamplerState *sampler=nullptr) const;
+  Texture *get_shader_input_texture_image(const InternalName *id, ShaderType::Access &access, int &z, int &n) const;
   const Shader::ShaderPtrData *get_shader_input_ptr(const InternalName *id) const;
   bool get_shader_input_ptr(const InternalName *id, Shader::ShaderPtrData &data) const;
-  const LMatrix4 &get_shader_input_matrix(const InternalName *id, LMatrix4 &matrix) const;
+  const LMatrix4f &get_shader_input_matrix(const InternalName *id, LMatrix4f &matrix) const;
+  const LMatrix4d &get_shader_input_matrix(const InternalName *id, LMatrix4d &matrix) const;
   ShaderBuffer *get_shader_input_buffer(const InternalName *id) const;
-
-  static void register_with_read_factory();
 
 PUBLISHED:
   MAKE_PROPERTY(shader, get_shader);
@@ -172,6 +173,15 @@ PUBLISHED:
   MAKE_PROPERTY(class_slot, get_class_slot);
 
 public:
+  static void register_with_read_factory();
+  virtual void write_datagram(BamWriter *manager, Datagram &dg);
+  virtual int complete_pointers(TypedWritable **plist, BamReader *manager);
+
+protected:
+  static TypedWritable *make_from_bam(const FactoryParams &params);
+  void fillin(DatagramIterator &scan, BamReader *manager);
+
+public:
   static TypeHandle get_class_type() {
     return _type_handle;
   }
@@ -179,7 +189,8 @@ public:
     RenderAttrib::init_type();
     register_type(_type_handle, "ShaderAttrib",
                   RenderAttrib::get_class_type());
-    _attrib_slot = register_slot(_type_handle, 10, new ShaderAttrib);
+    static StaticObject<ShaderAttrib> default_attrib;
+    _attrib_slot = register_slot(_type_handle, 10, default_attrib);
   }
   virtual TypeHandle get_type() const {
     return get_class_type();

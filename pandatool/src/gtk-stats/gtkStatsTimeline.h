@@ -41,7 +41,7 @@ protected:
   virtual void draw_separator(int row);
   virtual void draw_guide_bar(int x, GuideBarStyle style);
   virtual void draw_bar(int row, int from_x, int to_x, int collector_index,
-                        const std::string &collector_name);
+                        std::string_view collector_name);
   virtual void end_draw();
   virtual void idle();
 
@@ -63,6 +63,7 @@ protected:
   virtual gboolean handle_leave();
   gboolean handle_scroll(int graph_x, int graph_y,
                          double dx, double dy, bool ctrl_held);
+  gboolean handle_zoom(int graph_x, int graph_y, double scale);
   gboolean handle_key(bool pressed, guint val, guint16 hw_code);
 
 private:
@@ -92,6 +93,9 @@ private:
   int _highlighted_x = 0;
   int _scroll = 0;
   ColorBar _popup_bar;
+
+  double _zoom_scale = 1.0;
+  GtkGesture *_zoom_gesture = nullptr;
 };
 
 #endif

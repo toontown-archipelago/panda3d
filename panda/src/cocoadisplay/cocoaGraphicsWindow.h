@@ -42,7 +42,7 @@ typedef unsigned long NSUInteger;
 class EXPCL_PANDA_COCOADISPLAY CocoaGraphicsWindow : public GraphicsWindow {
 public:
   CocoaGraphicsWindow(GraphicsEngine *engine, GraphicsPipe *pipe,
-                      const std::string &name,
+                      std::string name,
                       const FrameBufferProperties &fb_prop,
                       const WindowProperties &win_prop,
                       int flags,
@@ -57,6 +57,8 @@ public:
 
   virtual void update_context();
   virtual void unbind_context();
+
+  CGFloat get_backing_scale_factor() const;
 
   void handle_move_event();
   void handle_resize_event();

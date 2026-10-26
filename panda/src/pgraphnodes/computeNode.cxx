@@ -27,8 +27,8 @@ TypeHandle ComputeNode::_type_handle;
  * assign a shader using a ShaderAttrib.
  */
 ComputeNode::
-ComputeNode(const std::string &name) :
-  PandaNode(name),
+ComputeNode(std::string name) :
+  PandaNode(std::move(name)),
   _dispatcher(new ComputeNode::Dispatcher)
 {
   set_internal_bounds(new OmniBoundingVolume);
@@ -82,11 +82,10 @@ add_for_draw(CullTraverser *trav, CullTraverserData &data) {
   // OK, render this node.  Rendering this node means creating a
   // CullableObject for the Dispatcher.  We don't need to pass any Geoms,
   // however.
-  CullableObject *object =
-    new CullableObject(nullptr, data._state,
-                       data.get_internal_transform(trav));
-  object->set_draw_callback(_dispatcher);
-  trav->get_cull_handler()->record_object(object, trav);
+  CullableObject object(nullptr, data._state,
+                        data.get_internal_transform(trav));
+  object.set_draw_callback(_dispatcher);
+  trav->get_cull_handler()->record_object(std::move(object), trav);
 }
 
 /**

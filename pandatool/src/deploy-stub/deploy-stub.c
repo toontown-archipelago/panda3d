@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include <time.h>
 
 #include <locale.h>
 
@@ -35,6 +36,7 @@ enum Flags {
   F_log_append = 1,
   F_log_filename_strftime = 2,
   F_keep_docstrings = 4,
+  F_python_verbose = 8,
 };
 
 /* Define an exposed symbol where we store the offset to the module data. */
@@ -416,6 +418,10 @@ int Py_FrozenMain(int argc, char **argv)
     }
 #endif
 
+    if (blobinfo.flags & F_python_verbose) {
+      Py_VerboseFlag = 1;
+    }
+
 #ifndef NDEBUG
     if ((p = Py_GETENV("PYTHONINSPECT")) && *p != '\0')
         inspect = 1;
@@ -712,7 +718,9 @@ int main(int argc, char *argv[]) {
       new_moddef->code = moddef->code;
       new_moddef->size = moddef->size < 0 ? -(moddef->size) : moddef->size;
       new_moddef->is_package = moddef->size < 0;
+#if PY_VERSION_HEX < 0x030d0000 // 3.13
       new_moddef->get_code = NULL;
+#endif
       new_moddef++;
     }
 #endif

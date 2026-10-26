@@ -28,7 +28,7 @@ TypeHandle glxGraphicsPipe::_type_handle;
  *
  */
 glxGraphicsPipe::
-glxGraphicsPipe(const string &display) : x11GraphicsPipe(display) {
+glxGraphicsPipe(std::string display) : x11GraphicsPipe(std::move(display)) {
   if (_display == None) {
     // Some error must have occurred.
     return;
@@ -69,7 +69,7 @@ pipe_constructor() {
  * Creates a new window on the pipe, if possible.
  */
 PT(GraphicsOutput) glxGraphicsPipe::
-make_output(const string &name,
+make_output(std::string_view name,
             const FrameBufferProperties &fb_prop,
             const WindowProperties &win_prop,
             int flags,
@@ -119,7 +119,7 @@ make_output(const string &name,
         ((flags&BF_can_bind_layered)!=0)) {
       return nullptr;
     }
-    return new glxGraphicsWindow(engine, this, name, fb_prop, win_prop,
+    return new glxGraphicsWindow(engine, this, std::string(name), fb_prop, win_prop,
                                  flags, gsg, host);
   }
 
@@ -128,6 +128,9 @@ make_output(const string &name,
   if (retry == 1) {
     if (!gl_support_fbo || host == nullptr ||
         (flags & (BF_require_parasite | BF_require_window)) != 0) {
+      return nullptr;
+    }
+    if (host->get_engine() != engine) {
       return nullptr;
     }
     // Early failure - if we are sure that this buffer WONT meet specs, we can
@@ -149,7 +152,7 @@ make_output(const string &name,
         precertify = true;
       }
     }
-    return new GLGraphicsBuffer(engine, this, name, fb_prop, win_prop,
+    return new GLGraphicsBuffer(engine, this, std::string(name), fb_prop, win_prop,
                                 flags, gsg, host);
   }
 
@@ -177,7 +180,7 @@ make_output(const string &name,
         }
       }
 
-      return new glxGraphicsBuffer(engine, this, name, fb_prop, win_prop,
+      return new glxGraphicsBuffer(engine, this, std::string(name), fb_prop, win_prop,
                                    flags, gsg, host);
     }
   }
@@ -201,7 +204,7 @@ make_output(const string &name,
       return nullptr;
     }
 
-    return new glxGraphicsPixmap(engine, this, name, fb_prop, win_prop,
+    return new glxGraphicsPixmap(engine, this, std::string(name), fb_prop, win_prop,
                                  flags, gsg, host);
   }
 
@@ -221,4 +224,14 @@ make_callback_gsg(GraphicsEngine *engine) {
   // glxGraphicsStateGuardian, because the externally-created context might
   // not have anything to do with the glx interface.
   return new PosixGraphicsStateGuardian(engine, this);
+}
+
+/**
+ * Releases the graphics context that is currently bound on the calling
+ * thread, if any.
+ */
+void glxGraphicsPipe::
+release_current_context() {
+  LightReMutexHolder holder(_x_mutex);
+  glXMakeCurrent(get_display(), None, nullptr);
 }

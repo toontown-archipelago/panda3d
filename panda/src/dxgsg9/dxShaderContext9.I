@@ -19,9 +19,5 @@
  */
 INLINE bool DXShaderContext9::
 valid(GSG *gsg) {
-#ifdef HAVE_CG
-  return (_cg_program != 0);
-#else
-  return false;
-#endif
+  return _vertex_shader != nullptr && _pixel_shader != nullptr;
 }

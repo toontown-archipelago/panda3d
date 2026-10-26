@@ -114,6 +114,9 @@ PUBLISHED:
   GraphicsEngine *get_engine() const;
   INLINE const GraphicsThreadingModel &get_threading_model() const;
   MAKE_PROPERTY(pipe, get_pipe);
+  MAKE_PROPERTY(engine, get_engine);
+
+  virtual bool make_current() const;
 
   INLINE bool is_hardware() const;
   virtual INLINE bool prefers_triangle_strips() const;
@@ -147,6 +150,7 @@ PUBLISHED:
 
   INLINE int get_max_vertex_transforms() const;
   INLINE int get_max_vertex_transform_indices() const;
+  INLINE bool get_supports_fixed_function_vertex_blending() const;
 
   INLINE bool get_copy_texture_inverted() const;
   virtual bool get_supports_multisample() const;
@@ -175,6 +179,12 @@ PUBLISHED:
   INLINE int get_maximum_simultaneous_render_targets() const;
   INLINE bool get_supports_dual_source_blending() const;
 
+public:
+  INLINE LVecBase3i get_max_compute_work_group_count() const;
+  INLINE LVecBase3i get_max_compute_work_group_size() const;
+  INLINE int get_max_compute_work_group_invocations() const;
+
+PUBLISHED:
   MAKE_PROPERTY(max_vertices_per_array, get_max_vertices_per_array);
   MAKE_PROPERTY(max_vertices_per_primitive, get_max_vertices_per_primitive);
   MAKE_PROPERTY(max_texture_stages, get_max_texture_stages);
@@ -221,13 +231,18 @@ PUBLISHED:
   MAKE_PROPERTY(timer_queries_active, get_timer_queries_active);
   MAKE_PROPERTY(max_color_targets, get_max_color_targets);
   MAKE_PROPERTY(supports_dual_source_blending, get_supports_dual_source_blending);
+  MAKE_PROPERTY(max_compute_work_group_count, get_max_compute_work_group_count);
+  MAKE_PROPERTY(max_compute_work_group_size, get_max_compute_work_group_size);
+  MAKE_PROPERTY(max_compute_work_group_invocations, get_max_compute_work_group_invocations);
 
   INLINE ShaderModel get_shader_model() const;
   INLINE void set_shader_model(ShaderModel shader_model);
   MAKE_PROPERTY(shader_model, get_shader_model, set_shader_model);
 
+  INLINE uint64_t get_supported_shader_capabilities() const;
+  MAKE_PROPERTY(supported_shader_capabilities, get_supported_shader_capabilities);
+
   virtual int get_supported_geom_rendering() const;
-  virtual bool get_supports_cg_profile(const std::string &name) const;
 
   INLINE bool get_color_scale_via_lighting() const;
   INLINE bool get_alpha_scale_via_texture() const;
@@ -237,7 +252,6 @@ PUBLISHED:
   INLINE static TextureStage *get_alpha_scale_texture_stage();
 
   void set_coordinate_system(CoordinateSystem cs);
-  INLINE CoordinateSystem get_coordinate_system() const;
   virtual CoordinateSystem get_internal_coordinate_system() const;
   MAKE_PROPERTY(coordinate_system, get_coordinate_system, set_coordinate_system);
 
@@ -266,7 +280,7 @@ PUBLISHED:
 #endif // !NDEBUG || !CPPPARSER
 
 PUBLISHED:
-  virtual bool has_extension(const std::string &extension) const;
+  virtual bool has_extension(std::string_view extension) const;
 
   virtual std::string get_driver_vendor();
   virtual std::string get_driver_renderer();
@@ -291,6 +305,7 @@ PUBLISHED:
 public:
   virtual TextureContext *prepare_texture(Texture *tex);
   virtual bool update_texture(TextureContext *tc, bool force);
+  virtual bool update_texture(TextureContext *tc, bool force, CompletionToken token);
   virtual void release_texture(TextureContext *tc);
   virtual void release_textures(const pvector<TextureContext *> &contexts);
   virtual bool extract_texture_data(Texture *tex);
@@ -315,6 +330,13 @@ public:
   virtual BufferContext *prepare_shader_buffer(ShaderBuffer *data);
   virtual void release_shader_buffer(BufferContext *ibc);
   virtual void release_shader_buffers(const pvector<BufferContext *> &contexts);
+  virtual bool update_shader_buffer_data(ShaderBuffer *buffer, size_t start,
+                                         size_t size, const unsigned char *data);
+  virtual bool extract_shader_buffer_data(ShaderBuffer *buffer, vector_uchar &data,
+                                          size_t start = 0, size_t size = (size_t)-1);
+  virtual void async_extract_shader_buffer_data(ShaderBuffer *buffer, vector_uchar &data,
+                                                size_t start = 0, size_t size = (size_t)-1,
+                                                CompletionToken token = CompletionToken());
 
   virtual void begin_occlusion_query();
   virtual PT(OcclusionQueryContext) end_occlusion_query();
@@ -332,20 +354,15 @@ public:
   virtual void set_state_and_transform(const RenderState *state,
                                        const TransformState *transform);
 
+  virtual bool state_supports_instancing() const;
+
   PN_stdfloat compute_distance_to(const LPoint3 &point) const;
 
   virtual void clear(DrawableRegion *clearable);
 
-  void update_shader_matrix_cache(Shader *shader, LVecBase4f *cache, int altered);
-  const LVecBase4f *fetch_specified_value(Shader::ShaderMatSpec &spec, const LVecBase4f *cache, int altered);
-  void fetch_specified_part(Shader::ShaderMatInput input, InternalName *name,
-                            LVecBase4f *into, int count = 1);
-  void fetch_specified_member(const NodePath &np, CPT_InternalName member,
-                              LVecBase4f &v);
-  PT(Texture) fetch_specified_texture(Shader::ShaderTexSpec &spec,
-                                      SamplerState &sampler, int &view);
-  const Shader::ShaderPtrData *fetch_ptr_parameter(const Shader::ShaderPtrSpec& spec);
-  bool fetch_ptr_parameter(const Shader::ShaderPtrSpec &spec, Shader::ShaderPtrData &data);
+  void update_shader_matrix_cache(Shader *shader, LMatrix4 *cache, int altered);
+  void fetch_specified_matrix(Shader::StateMatrix input, const InternalName *name,
+                              LMatrix4 *into);
 
   virtual void prepare_display_region(DisplayRegionPipelineReader *dr);
   virtual void clear_before_callback();
@@ -373,7 +390,7 @@ public:
 
   virtual bool begin_draw_primitives(const GeomPipelineReader *geom_reader,
                                      const GeomVertexDataPipelineReader *data_reader,
-                                     size_t num_instances, bool force);
+                                     const InstanceList *instances, bool force);
   virtual bool draw_triangles(const GeomPrimitivePipelineReader *reader,
                               bool force);
   virtual bool draw_triangles_adj(const GeomPrimitivePipelineReader *reader,
@@ -401,6 +418,10 @@ public:
   INLINE bool reset_if_new();
   INLINE void mark_new();
   virtual void reset();
+
+  INLINE const RenderState *get_target_state() const;
+  INLINE const ShaderAttrib *get_target_shader_attrib() const;
+  INLINE const GeomVertexDataPipelineReader *get_data_reader() const;
 
   INLINE CPT(TransformState) get_external_transform() const;
   INLINE CPT(TransformState) get_internal_transform() const;
@@ -436,9 +457,12 @@ public:
 
   static void create_gamma_table (PN_stdfloat gamma, unsigned short *red_table, unsigned short *green_table, unsigned short *blue_table);
 
-  PT(Texture) get_shadow_map(const NodePath &light_np, GraphicsOutputBase *host=nullptr);
-  PT(Texture) get_dummy_shadow_map(Texture::TextureType texture_type) const;
+  Texture *get_shadow_map(const NodePath &light_np, GraphicsOutputBase *host=nullptr);
+  Texture *get_dummy_shadow_map(bool cube_map) const;
   virtual GraphicsOutput *make_shadow_buffer(LightLensNode *light, Texture *tex, GraphicsOutput *host);
+
+  ShaderBuffer *get_shader_debug_buffer(size_t min_size = sizeof(uint32_t));
+  bool drain_shader_debug_buffer(Shader *shader);
 
   virtual void ensure_generated_shader(const RenderState *state);
 
@@ -527,7 +551,6 @@ protected:
   CPT(TransformState) _projection_mat_inv;
   const FrameBufferProperties *_current_properties;
 
-  CoordinateSystem _coordinate_system;
   CoordinateSystem _internal_coordinate_system;
   CPT(TransformState) _cs_transform;
   CPT(TransformState) _inv_cs_transform;
@@ -594,6 +617,7 @@ protected:
 
   int _max_vertex_transforms;
   int _max_vertex_transform_indices;
+  bool _supports_fixed_function_vertex_blending;
 
   bool _supports_occlusion_query;
   PT(OcclusionQueryContext) _current_occlusion_query;
@@ -612,14 +636,15 @@ protected:
   bool _supports_luminance_texture;
   bool _supports_shadow_filter;
   bool _supports_sampler_objects;
-  bool _supports_basic_shaders;
-  bool _supports_geometry_shaders;
-  bool _supports_tessellation_shaders;
-  bool _supports_compute_shaders;
   bool _supports_glsl;
   bool _supports_hlsl;
+  bool _supports_spir_v;
   bool _supports_framebuffer_multisample;
   bool _supports_framebuffer_blit;
+
+  LVecBase3i _max_compute_work_group_count;
+  LVecBase3i _max_compute_work_group_size;
+  int _max_compute_work_group_invocations;
 
   bool _supports_stencil;
   bool _supports_stencil_wrap;
@@ -639,10 +664,9 @@ protected:
 
   ShaderModel _auto_detect_shader_model;
   ShaderModel _shader_model;
+  uint64_t _supported_shader_caps;
 
   static PT(TextureStage) _alpha_scale_texture_stage;
-
-  Shader::ShaderCaps _shader_caps;
 
   PN_stdfloat _gamma;
   Texture::QualityLevel _texture_quality_override;
@@ -654,6 +678,8 @@ protected:
 #else // !NDEBUG
   PT(Texture) _flash_texture_unused;
 #endif // !NDEBUG
+
+  PT(ShaderBuffer) _shader_debug_buffer;
 
 public:
   // Statistics
@@ -689,6 +715,7 @@ public:
   static PStatCollector _draw_set_state_pcollector;
   static PStatCollector _flush_pcollector;
   static PStatCollector _compute_dispatch_pcollector;
+  static PStatCollector _compute_work_groups_pcollector;
   static PStatCollector _wait_occlusion_pcollector;
   static PStatCollector _wait_timer_pcollector;
   static PStatCollector _timer_queries_pcollector;

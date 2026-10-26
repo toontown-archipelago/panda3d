@@ -32,7 +32,6 @@
 #import "cocoaPandaAppDelegate.h"
 
 #import <ApplicationServices/ApplicationServices.h>
-#import <Foundation/NSAutoreleasePool.h>
 #import <AppKit/NSApplication.h>
 #import <AppKit/NSCursor.h>
 #import <AppKit/NSEvent.h>
@@ -48,18 +47,24 @@ TypeHandle CocoaGraphicsWindow::_type_handle;
 #define NSAppKitVersionNumber10_14 1671
 #endif
 
+#if __MAC_OS_X_VERSION_MAX_ALLOWED < 1070
+enum {
+  NSFullScreenWindowMask = 1 << 14
+};
+#endif
+
 /**
  *
  */
 CocoaGraphicsWindow::
 CocoaGraphicsWindow(GraphicsEngine *engine, GraphicsPipe *pipe,
-                    const std::string &name,
+                    std::string name,
                     const FrameBufferProperties &fb_prop,
                     const WindowProperties &win_prop,
                     int flags,
                     GraphicsStateGuardian *gsg,
                     GraphicsOutput *host) :
-  GraphicsWindow(engine, pipe, name, fb_prop, win_prop, flags, gsg, host)
+  GraphicsWindow(engine, pipe, std::move(name), fb_prop, win_prop, flags, gsg, host)
 {
   _window = nil;
   _view = nil;
@@ -178,7 +183,6 @@ void CocoaGraphicsWindow::
 process_events() {
   GraphicsWindow::process_events();
 
-  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
   NSEvent *event = nil;
 
   while (true) {
@@ -212,8 +216,6 @@ process_events() {
   if (_window != nil) {
     [_window update];
   }
-
-  [pool release];
 
   if (_context_needs_update && _gsg != nullptr) {
     update_context();
@@ -424,6 +426,14 @@ open_window() {
     if (_window == nil) {
       cocoadisplay_cat.error()
         << "Failed to create Cocoa window.\n";
+      return false;
+    }
+
+    if ([_window screen] == nil) {
+      cocoadisplay_cat.error()
+        << "No screen available for Cocoa window.\n";
+      [_window close];
+      _window = nil;
       return false;
     }
   }
@@ -729,13 +739,12 @@ set_properties_now(WindowProperties &properties) {
       // here.
       if (!properties.has_undecorated() && !_properties.get_undecorated() &&
           [_window respondsToSelector:@selector(setStyleMask:)]) {
-        if (properties.get_fixed_size()) {
-          [_window setStyleMask:NSTitledWindowMask | NSClosableWindowMask |
-                                NSMiniaturizableWindowMask ];
-        } else {
-          [_window setStyleMask:NSTitledWindowMask | NSClosableWindowMask |
-                                NSMiniaturizableWindowMask | NSResizableWindowMask ];
+        NSUInteger style = ([_window styleMask] & NSFullScreenWindowMask);
+        style |= NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask;
+        if (!properties.get_fixed_size()) {
+          style |= NSResizableWindowMask;
         }
+        [_window setStyleMask:style];
         [_window makeFirstResponder:_view];
         // Resize event fired by makeFirstResponder has an invalid backing scale factor
         // The actual size must be reset afterward
@@ -750,16 +759,14 @@ set_properties_now(WindowProperties &properties) {
     _properties.set_undecorated(properties.get_undecorated());
 
     if (!_properties.get_fullscreen()) {
-      if (properties.get_undecorated()) {
-        [_window setStyleMask: NSBorderlessWindowMask];
-      } else if (_properties.get_fixed_size()) {
-        // Fixed size windows should not show the resize button.
-        [_window setStyleMask: NSTitledWindowMask | NSClosableWindowMask |
-                               NSMiniaturizableWindowMask ];
-      } else {
-        [_window setStyleMask: NSTitledWindowMask | NSClosableWindowMask |
-                               NSMiniaturizableWindowMask | NSResizableWindowMask ];
+      NSUInteger style = ([_window styleMask] & NSFullScreenWindowMask);
+      if (!properties.get_undecorated()) {
+        style |= NSTitledWindowMask | NSClosableWindowMask | NSMiniaturizableWindowMask;
+        if (!properties.get_fixed_size()) {
+          style |= NSResizableWindowMask;
+        }
       }
+      [_window setStyleMask:style];
       [_window makeFirstResponder:_view];
       // Resize event fired by makeFirstResponder has an invalid backing scale factor
       // The actual size must be reset afterward
@@ -776,7 +783,10 @@ set_properties_now(WindowProperties &properties) {
     if (!_properties.get_fullscreen()) {
       // We use the view, not the window, to convert the frame size, expressed
       // in pixels, into points as the "dpi awareness" is managed by the view.
-      NSSize size = [_view convertSizeFromBacking:NSMakeSize(width, height)];
+      NSSize size = NSMakeSize(width, height);
+      if (dpi_aware) {
+        size = [_view convertSizeFromBacking:NSMakeSize(width, height)];
+      }
       if (_window != nil) {
         [_window setContentSize:size];
       }
@@ -784,7 +794,8 @@ set_properties_now(WindowProperties &properties) {
 
       if (cocoadisplay_cat.is_debug()) {
         cocoadisplay_cat.debug()
-          << "Setting size to " << width << ", " << height << "\n";
+          << "Setting size to " << width << " x " << height
+          << " (scaled to " << size.width << " x " << size.height << ")\n";
       }
 
       // Cocoa doesn't send an event, and the other resize-window handlers
@@ -1015,6 +1026,15 @@ unbind_context() {
 }
 
 /**
+ * Returns the window's backing scale factor.
+ */
+CGFloat CocoaGraphicsWindow::
+get_backing_scale_factor() const {
+  // This is Objective-C code so we can't put it in the .I file.
+  return _window.backingScaleFactor;
+}
+
+/**
  * Returns an appropriate CGDisplayModeRef for the given width and height, or
  * NULL if none was found.
  */
@@ -1177,10 +1197,16 @@ do_switch_fullscreen(CGDisplayModeRef mode) {
     }
 
     if (_window != nil) {
+      // Exit macOS' own fullscreen mode, since our own fullscreen mode
+      // doesn't work properly with it.
+      if ([_window styleMask] & NSFullScreenWindowMask) {
+        [_window toggleFullScreen:nil];
+      }
+
       // For some reason, setting the style mask makes it give up its
       // first-responder status.
       if ([_window respondsToSelector:@selector(setStyleMask:)]) {
-        [_window setStyleMask:NSBorderlessWindowMask];
+        [_window setStyleMask:([_window styleMask] & NSFullScreenWindowMask)];
       }
       [_window makeFirstResponder:_view];
       [_window setLevel:CGShieldingWindowLevel()];
@@ -1375,7 +1401,11 @@ handle_resize_event() {
     [_view setFrameSize:contentRect.size];
   }
 
-  NSRect frame = [_view convertRectToBacking:[_view bounds]];
+  NSRect frame = [_view bounds];
+
+  if (dpi_aware) {
+    frame = [_view convertRectToBacking:frame];
+  }
 
   WindowProperties properties;
   bool changed = false;
@@ -1549,36 +1579,12 @@ handle_close_event() {
 
   _window = nil;
 
-  // Get rid of the GSG
-  if (_gsg != nullptr) {
-    unbind_context();
-    _gsg.clear();
-  }
-
-  // Dump the view, too
-  if (_view != nil) {
-    [_view release];
-    _view = nil;
-  }
-
-  // Unhide the mouse cursor
-  if (_mouse_hidden) {
-    [NSCursor unhide];
-    _mouse_hidden = false;
-  }
-
-  // Release the cursor.
-  if (_cursor != nil) {
-    [_cursor release];
-    _cursor = nil;
-  }
+  close_window();
 
   WindowProperties properties;
   properties.set_open(false);
   properties.set_cursor_hidden(false);
   system_changed_properties(properties);
-
-  GraphicsWindow::close_window();
 }
 
 /**
@@ -1844,8 +1850,8 @@ handle_mouse_moved_event(bool in_window, double x, double y, bool absolute) {
       && !in_window) {
     CGPoint point;
 
-    nx = std::max(0., std::min((double) get_x_size() - 1, nx));
-    ny = std::max(0., std::min((double) get_y_size() - 1, ny));
+    nx = std::clamp(nx, 0., (double) get_x_size() - 1);
+    ny = std::clamp(ny, 0., (double) get_y_size() - 1);
 
     // Convert back mouse position to screen space using point units
     if (_properties.get_fullscreen()) {

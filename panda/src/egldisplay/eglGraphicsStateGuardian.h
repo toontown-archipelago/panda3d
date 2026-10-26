@@ -48,6 +48,8 @@ public:
 
   virtual ~eglGraphicsStateGuardian();
 
+  virtual bool make_current() const;
+
   virtual void reset();
 
   bool egl_is_at_least_version(int major_version, int minor_version) const;
@@ -60,6 +62,7 @@ public:
 #endif
   EGLConfig _fbconfig;
   FrameBufferProperties _fbprops;
+  bool _supports_surfaceless = false;
 
 protected:
   virtual void gl_flush() const;

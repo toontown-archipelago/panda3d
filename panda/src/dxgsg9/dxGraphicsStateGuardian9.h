@@ -107,7 +107,7 @@ public:
 
   virtual bool begin_draw_primitives(const GeomPipelineReader *geom_reader,
                                      const GeomVertexDataPipelineReader *data_reader,
-                                     size_t num_instances, bool force);
+                                     const InstanceList *instances, bool force);
   virtual bool draw_triangles(const GeomPrimitivePipelineReader *reader,
                               bool force);
   virtual bool draw_tristrips(const GeomPrimitivePipelineReader *reader,
@@ -166,15 +166,12 @@ public:
   void restore_gamma();
   static void atexit_function(void);
 
-  static void set_cg_device(LPDIRECT3DDEVICE9 cg_device);
-  virtual bool get_supports_cg_profile(const std::string &name) const;
-
-  LPDIRECT3DVERTEXBUFFER9 get_white_vbuffer();
+  LPDIRECT3DVERTEXBUFFER9 get_constant_vbuffer(const LColor &color);
 
 protected:
   void do_issue_transform();
   void do_issue_alpha_test();
-  void do_issue_shader();
+  bool do_issue_shader();
   void do_issue_render_mode();
   void do_issue_rescale_normal();
   void do_issue_color_write();
@@ -201,7 +198,6 @@ protected:
   virtual void bind_clip_plane(const NodePath &plane, int plane_id);
 
   virtual void close_gsg();
-  void free_nondx_resources();
   void free_d3d_device();
 
   void set_draw_buffer(const RenderBuffer &rb);
@@ -292,10 +288,9 @@ protected:
 
   PT(Shader) _current_shader;
   DXShaderContext9 *_current_shader_context;
-  PT(Shader) _vertex_array_shader;
-  DXShaderContext9 *_vertex_array_shader_context;
   PT(Shader) _texture_binding_shader;
   DXShaderContext9 *_texture_binding_shader_context;
+  pvector<LMatrix4> _matrix_cache;
 
   const DXIndexBufferContext9 *_active_ibuffer;
 
@@ -316,7 +311,9 @@ protected:
 
   DWORD _last_fvf;
   int _num_bound_streams;
-  LPDIRECT3DVERTEXBUFFER9 _white_vbuffer;
+  bool _instancing_enabled;
+  LPDIRECT3DVERTEXBUFFER9 _constant_vbuffer;
+  D3DCOLOR _constant_vbuffer_color;
 
   // Cache the data necessary to bind each particular light each frame, so if
   // we bind a given light multiple times, we only have to compute its data
@@ -359,18 +356,11 @@ protected:
   char *_vertex_shader_profile;
   char *_pixel_shader_profile;
 
-  int _vertex_shader_maximum_constants;
-
   bool _supports_stream_offset;
 
   std::list <wdxGraphicsBuffer9 **> _graphics_buffer_list;
 
   int _supports_gamma_calibration;
-
-#ifdef HAVE_CG
-  CGcontext _cg_context;
-  static LPDIRECT3DDEVICE9 _cg_device;
-#endif
 
 public:
   virtual TypeHandle get_type() const {

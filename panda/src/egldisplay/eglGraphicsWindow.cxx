@@ -45,13 +45,13 @@ TypeHandle eglGraphicsWindow::_type_handle;
  */
 eglGraphicsWindow::
 eglGraphicsWindow(GraphicsEngine *engine, GraphicsPipe *pipe,
-                  const std::string &name,
+                  std::string name,
                   const FrameBufferProperties &fb_prop,
                   const WindowProperties &win_prop,
                   int flags,
                   GraphicsStateGuardian *gsg,
                   GraphicsOutput *host) :
-  x11GraphicsWindow(engine, pipe, name, fb_prop, win_prop, flags, gsg, host)
+  x11GraphicsWindow(engine, pipe, std::move(name), fb_prop, win_prop, flags, gsg, host)
 {
   eglGraphicsPipe *egl_pipe;
   DCAST_INTO_V(egl_pipe, _pipe);
@@ -223,7 +223,8 @@ open_window() {
     // If the old gsg has the wrong pixel format, create a new one that shares
     // with the old gsg.
     DCAST_INTO_R(eglgsg, _gsg, false);
-    if (!eglgsg->get_fb_properties().subsumes(_fb_properties)) {
+    if (eglgsg->get_engine() != _engine ||
+        !eglgsg->get_fb_properties().subsumes(_fb_properties)) {
       eglgsg = new eglGraphicsStateGuardian(_engine, _pipe, eglgsg);
       eglgsg->choose_pixel_format(_fb_properties, egl_pipe, true, false, false);
       _gsg = eglgsg;

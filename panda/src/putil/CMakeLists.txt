@@ -20,6 +20,10 @@ set(P3PUTIL_HEADERS
   clockObject.h clockObject.I
   collideMask.h
   colorSpace.h
+  compilerOptions.I compilerOptions.h
+  completable.I completable.h
+  completionCounter.I completionCounter.h
+  completionToken.I completionToken.h
   copyOnWriteObject.h copyOnWriteObject.I
   copyOnWritePointer.h copyOnWritePointer.I
   compareTo.I compareTo.h
@@ -86,6 +90,8 @@ set(P3PUTIL_SOURCES
   callbackObject.cxx
   clockObject.cxx
   colorSpace.cxx
+  compilerOptions.cxx
+  completionCounter.cxx
   copyOnWriteObject.cxx
   copyOnWritePointer.cxx
   config_putil.cxx configurable.cxx

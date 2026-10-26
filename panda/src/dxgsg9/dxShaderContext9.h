@@ -24,36 +24,9 @@
 class VertexElementArray;
 class DXGraphicsStateGuardian9;
 
-// Caution: adding HLSL support is going to be tricky, as the parsing needs to
-// be done in the cull thread, which cannot use the DX API.  - Josh
-//
-//
-// typedef struct
-// {
-//   int vertex_shader;
-//   int total_constant_descriptions;
-//   D3DXCONSTANT_DESC *constant_description_array;
-// }
-// DX_PARAMETER;
-//
-// typedef struct
-// {
-//   int state;
-//   union
-//   {
-//     DIRECT_3D_VERTEX_SHADER direct_3d_vertex_shader;
-//     DIRECT_3D_PIXEL_SHADER direct_3d_pixel_shader;
-//   };
-//   LPD3DXCONSTANTTABLE constant_table;
-//   D3DXCONSTANTTABLE_DESC constant_table_description;
-//
-//   int total_semantics;
-//   D3DXSEMANTIC *semantic_array;
-// }
-// DIRECT_3D_SHADER;
-
 /**
- * xyz
+ * Shader back-end for DX9.  We only support SPIR-V shaders, which are
+ * transpiled to HLSL by spirv-cross, then compiled using D3DXCompileShader.
  */
 class EXPCL_PANDADX DXShaderContext9 : public ShaderContext {
 public:
@@ -62,32 +35,65 @@ public:
   DXShaderContext9(Shader *s, GSG *gsg);
   ~DXShaderContext9();
 
+  bool compile_module(const ShaderModule *module, DWORD *&data);
+  bool query_constants(const ShaderModule *module, DWORD *data);
+
+  INLINE bool uses_vertex_color();
+
   INLINE bool valid(GSG *gsg);
   bool bind(GSG *gsg);
   void unbind(GSG *gsg);
   void issue_parameters(GSG *gsg, int altered);
-  void issue_transform(GSG *gsg);
-  void disable_shader_vertex_arrays(GSG *gsg);
-  bool update_shader_vertex_arrays(DXShaderContext9 *prev, GSG *gsg,
-                                   bool force);
+  void update_tables(GSG *gsg, const GeomVertexDataPipelineReader *data_reader);
   void disable_shader_texture_bindings(GSG *gsg);
   void update_shader_texture_bindings(DXShaderContext9 *prev, GSG *gsg);
 
-  class VertexElementArray* _vertex_element_array;
-  LPDIRECT3DVERTEXDECLARATION9 _vertex_declaration;
-
-  int _num_bound_streams;
-
-  // FOR DEBUGGING
-  std::string _name;
+  LPDIRECT3DVERTEXDECLARATION9 get_vertex_declaration(GSG *gsg, const GeomVertexFormat *format, BitMask32 &used_streams);
 
 private:
-#ifdef HAVE_CG
-  CGprogram _cg_program;
-  pvector <CGparameter> _cg_parameter_map;
-#endif
+  bool r_query_constants(Shader::Stage stage, const Shader::Parameter &param,
+                         const ShaderType *type, size_t offset,
+                         BYTE *table_data, D3DXSHADER_TYPEINFO &typeinfo,
+                         int reg_set, int &reg_idx, int reg_end);
+  bool r_query_resources(Shader::Stage stage, const Shader::Parameter &param,
+                         const ShaderType *type, const char *path, int index,
+                         int reg_set, int &reg_idx, int reg_end);
 
-  LVecBase4f *_mat_part_cache = nullptr;
+  IDirect3DVertexShader9 *_vertex_shader = nullptr;
+  IDirect3DPixelShader9 *_pixel_shader = nullptr;
+
+  struct Binding {
+    PT(ShaderInputBinding) _binding;
+    size_t _offset;
+    int _dep;
+  };
+  pvector<Binding> _data_bindings;
+  size_t _scratch_space_size = 0;
+
+  struct ConstantRegister {
+    D3DXREGISTER_SET set;
+    bool convert = false;
+    int reg = -1;
+    UINT count = 0;
+    int dep = 0;
+    size_t offset = 0;
+  };
+
+  int _half_pixel_register = -1;
+  pvector<ConstantRegister> _vertex_constants;
+  pvector<ConstantRegister> _pixel_constants;
+  int _constant_deps = 0;
+
+  struct TextureRegister {
+    UINT unit;
+    PT(ShaderInputBinding) binding;
+    uint64_t resource_id;
+    int size_vreg = -1;
+    int size_freg = -1;
+  };
+  pvector<TextureRegister> _textures;
+
+  pmap<CPT(GeomVertexFormat), std::pair<LPDIRECT3DVERTEXDECLARATION9, BitMask32> > _vertex_declarations;
 
 private:
   void release_resources(void);

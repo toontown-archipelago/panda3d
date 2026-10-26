@@ -24,7 +24,6 @@
 #include "geomNode.h"
 #include "cullTraverserData.h"
 #include "pStatCollector.h"
-#include "deletedChain.h"
 #include "graphicsStateGuardianBase.h"
 #include "sceneSetup.h"
 #include "lightMutex.h"
@@ -41,12 +40,15 @@ class GeomMunger;
  */
 class EXPCL_PANDA_PGRAPH CullableObject {
 public:
-  INLINE CullableObject();
+  INLINE CullableObject() = default;
   INLINE CullableObject(CPT(Geom) geom, CPT(RenderState) state,
                         CPT(TransformState) internal_transform);
 
   INLINE CullableObject(const CullableObject &copy);
+  INLINE CullableObject(CullableObject &&from) noexcept = default;
+
   INLINE void operator = (const CullableObject &copy);
+  INLINE CullableObject &operator = (CullableObject &&from) noexcept = default;
 
   bool munge_geom(GraphicsStateGuardianBase *gsg, GeomMunger *munger,
                   const CullTraverser *traverser, bool force);
@@ -64,8 +66,6 @@ public:
                             bool force, Thread *current_thread);
 
 public:
-  ALLOC_DELETED_CHAIN(CullableObject);
-
   void output(std::ostream &out) const;
 
 public:
@@ -75,11 +75,11 @@ public:
   CPT(TransformState) _internal_transform;
   PT(CallbackObject) _draw_callback;
   CPT(InstanceList) _instances;
-  int _num_instances = 1;
 
 private:
   void munge_instances(Thread *current_thread);
   bool munge_points_to_quads(const CullTraverser *traverser, bool force);
+  bool munge_lines_to_quads(const CullTraverser *traverser, bool force);
 
   static CPT(RenderState) get_flash_cpu_state();
   static CPT(RenderState) get_flash_hardware_state();
@@ -117,6 +117,7 @@ private:
   static PStatCollector _munge_sprites_pcollector;
   static PStatCollector _munge_sprites_verts_pcollector;
   static PStatCollector _munge_sprites_prims_pcollector;
+  static PStatCollector _munge_lines_pcollector;
   static PStatCollector _munge_instances_pcollector;
   static PStatCollector _sw_sprites_pcollector;
 

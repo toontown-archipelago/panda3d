@@ -29,7 +29,7 @@
  */
 class EXPCL_PANDA_EXPRESS VirtualFileMountAndroidAsset : public VirtualFileMount {
 PUBLISHED:
-  INLINE VirtualFileMountAndroidAsset(AAssetManager *mgr, const std::string &apk_path);
+  INLINE VirtualFileMountAndroidAsset(AAssetManager *mgr, std::string apk_path);
   virtual ~VirtualFileMountAndroidAsset();
 
 public:
@@ -74,7 +74,6 @@ private:
 
   private:
     AAsset *_asset;
-    off_t _offset;
 
     friend class VirtualFileMountAndroidAsset;
   };

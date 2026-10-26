@@ -61,8 +61,8 @@ fillin(DatagramIterator &scan, BamReader *manager) {
  *
  */
 PointLight::
-PointLight(const std::string &name) :
-  LightLensNode(name) {
+PointLight(std::string name) :
+  LightLensNode(std::move(name)) {
   PT(Lens) lens;
   lens = new PerspectiveLens(90, 90);
   lens->set_interocular_distance(0);
@@ -208,10 +208,8 @@ setup_shadow_map() {
   _shadow_map->set_clear_color(LColor(1));
   _shadow_map->set_wrap_u(SamplerState::WM_clamp);
   _shadow_map->set_wrap_v(SamplerState::WM_clamp);
-
-  // Note: cube map shadow filtering doesn't seem to work in Cg.
-  _shadow_map->set_minfilter(SamplerState::FT_linear);
-  _shadow_map->set_magfilter(SamplerState::FT_linear);
+  _shadow_map->set_minfilter(SamplerState::FT_shadow);
+  _shadow_map->set_magfilter(SamplerState::FT_shadow);
 }
 
 /**

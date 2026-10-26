@@ -1,0 +1,345 @@
+/**
+ * PANDA 3D SOFTWARE
+ * Copyright (c) Carnegie Mellon University.  All rights reserved.
+ *
+ * All use of this software is subject to the terms of the revised BSD
+ * license.  You should have received a copy of this license along
+ * with this source code in a file named "LICENSE."
+ *
+ * @file shaderType.I
+ * @author rdb
+ * @date 2019-03-12
+ */
+
+/**
+ * Takes an rvalue ShaderType and returns a uniquified pointer to an equivalent
+ * ShaderType object.
+ */
+template<class Type>
+const Type *ShaderType::
+register_type(Type &&type) {
+  nassertr(_registered_types != nullptr, nullptr);
+
+  Registry::iterator it = _registered_types->find(&type);
+  if (it != _registered_types->end()) {
+    return (const Type *)*it;
+  }
+
+  Type *new_type = new Type(std::move(type));
+  _registered_types->insert(new_type);
+  return new_type;
+}
+
+/**
+ * Returns true if this type has been registered.
+ */
+INLINE bool ShaderType::
+is_registered() const {
+  return _registered_types != nullptr && _registered_types->count(this) > 0;
+}
+
+/**
+ * Provides an arbitrary ordering among all unique shader types, so we can
+ * store the essentially different ones in a big set and throw away the rest.
+ */
+INLINE int ShaderType::
+compare_to(const ShaderType &other) const {
+  TypeHandle this_type = get_type();
+  TypeHandle other_type = other.get_type();
+  if (this_type == other_type) {
+    return compare_to_impl(other);
+  }
+  return (this_type > other_type) - (this_type < other_type);
+}
+
+/**
+ * Returns the size of the given scalar type, in bytes.
+ */
+INLINE constexpr uint32_t ShaderType::
+get_scalar_size_bytes(ScalarType scalar_type) {
+  return (scalar_type == ST_double) ? 8 : 4;
+}
+
+/**
+ * Constructs a scalar type.
+ */
+INLINE ShaderType::Scalar::
+Scalar(ScalarType scalar_type) : _scalar_type(scalar_type) {
+}
+
+/**
+ * Returns the base numeric type.
+ */
+INLINE ShaderType::ScalarType ShaderType::Scalar::
+get_scalar_type() const {
+  return _scalar_type;
+}
+
+/**
+ * Constructs a vector from a scalar type and number of elements.
+ */
+INLINE ShaderType::Vector::
+Vector(ScalarType scalar_type, uint32_t num_components) :
+  _scalar_type(scalar_type),
+  _num_components(num_components) {
+}
+
+/**
+ * Returns the scalar type that this vector consists of.
+ */
+INLINE ShaderType::ScalarType ShaderType::Vector::
+get_scalar_type() const {
+  return _scalar_type;
+}
+
+/**
+ * Returns the base numeric type as a Scalar object.
+ */
+INLINE const ShaderType::Scalar *ShaderType::Vector::
+get_scalar_type_obj() const {
+  return ShaderType::get_scalar_type_obj(_scalar_type);
+}
+
+/**
+ * Returns the number of components in this vector.
+ */
+INLINE uint32_t ShaderType::Vector::
+get_num_components() const {
+  return _num_components;
+}
+
+/**
+ * Constructs a matrix type from a scalar type, a number of rows and columns.
+ * Note that this is using Panda terminology.  In GLSL parlance, rows are
+ * called "columns" and columns are called "rows".
+ */
+INLINE ShaderType::Matrix::
+Matrix(ScalarType scalar_type, uint32_t num_rows, uint32_t num_columns, uint32_t row_stride_bytes) :
+  _scalar_type(scalar_type),
+  _num_rows(num_rows),
+  _num_columns(num_columns),
+  _row_stride_bytes(row_stride_bytes != 0 ? row_stride_bytes : ((get_scalar_size_bytes(scalar_type) * num_columns + 15) & ~15)) {
+}
+
+/**
+ * Returns the scalar type that this matrix consists of.
+ */
+INLINE ShaderType::ScalarType ShaderType::Matrix::
+get_scalar_type() const {
+  return _scalar_type;
+}
+
+/**
+ * Returns the base numeric type as a Scalar object.
+ */
+INLINE const ShaderType::Scalar *ShaderType::Matrix::
+get_scalar_type_obj() const {
+  return ShaderType::get_scalar_type_obj(_scalar_type);
+}
+
+/**
+ * Returns the number of rows in this matrix type (or the number of columns,
+ * in GLSL parlance).
+ */
+INLINE uint32_t ShaderType::Matrix::
+get_num_rows() const {
+  return _num_rows;
+}
+
+/**
+ * Returns the number of columns in this matrix type (or the number of rows,
+ * in GLSL parlance).
+ */
+INLINE uint32_t ShaderType::Matrix::
+get_num_columns() const {
+  return _num_columns;
+}
+
+/**
+ * Returns the number of bytes from the beginning of one row to the next.
+ */
+INLINE uint32_t ShaderType::Matrix::
+get_row_stride_bytes() const {
+  return _row_stride_bytes;
+}
+
+/**
+ * Returns the number of members in this struct.
+ */
+INLINE size_t ShaderType::Struct::
+get_num_members() const {
+  return _members.size();
+}
+
+/**
+ * Returns the nth member of this struct.
+ */
+INLINE const ShaderType::Struct::Member &ShaderType::Struct::
+get_member(size_t i) const {
+  assert(i < _members.size());
+  return _members[i];
+}
+
+/**
+ * Returns true if this struct has a member with the given name.
+ */
+INLINE bool ShaderType::Struct::
+has_member(const std::string &name) const {
+  for (size_t i = 0; i < _members.size(); ++i) {
+    if (_members[i].name == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Constructs an array type from a base type and number of elements.
+ */
+INLINE ShaderType::Array::
+Array(const ShaderType *element_type, uint32_t num_elements, uint32_t stride_bytes) :
+  _element_type(element_type),
+  _num_elements(num_elements),
+  _stride_bytes((stride_bytes != 0 || element_type == nullptr) ? stride_bytes : ((element_type->get_size_bytes() + 15) & ~15)) {
+}
+
+/**
+ * Returns the type of elements in this array.
+ */
+INLINE const ShaderType *ShaderType::Array::
+get_element_type() const {
+  return _element_type;
+}
+
+/**
+ * Returns the number of elements in this array.
+ */
+INLINE uint32_t ShaderType::Array::
+get_num_elements() const {
+  return _num_elements;
+}
+
+/**
+ * Returns the array stride in bytes.
+ */
+INLINE uint32_t ShaderType::Array::
+get_stride_bytes() const {
+  return _stride_bytes;
+}
+
+/**
+ * Constructs an image type.
+ */
+INLINE ShaderType::Image::
+Image(Texture::TextureType type, ScalarType sampled_type, Access access) :
+  _texture_type(type),
+  _sampled_type(sampled_type),
+  _access(access) {
+}
+
+/**
+ * Returns the type of texture this image samples.
+ */
+INLINE Texture::TextureType ShaderType::Image::
+get_texture_type() const {
+  return _texture_type;
+}
+
+/**
+ * Returns the type of scalar that sampling this image produces.
+ */
+INLINE ShaderType::ScalarType ShaderType::Image::
+get_sampled_type() const {
+  return _sampled_type;
+}
+
+/**
+ * Returns the type of scalar that sampling this image produces as a Scalar.
+ */
+INLINE const ShaderType::Scalar *ShaderType::Image::
+get_sampled_type_obj() const {
+  return ShaderType::get_scalar_type_obj(_sampled_type);
+}
+
+/**
+ * Returns the way this image is accessed.
+ */
+INLINE ShaderType::Access ShaderType::Image::
+get_access() const {
+  return _access;
+}
+
+/**
+ * Returns true if this image input is writable.
+ */
+INLINE bool ShaderType::Image::
+is_writable() const {
+  return ((int)_access & (int)Access::WRITE_ONLY) != 0;
+}
+
+/**
+ * Constructs a sampled image type.
+ */
+INLINE ShaderType::SampledImage::
+SampledImage(Texture::TextureType type, ScalarType sampled_type, bool shadow) :
+  _texture_type(type),
+  _sampled_type(sampled_type),
+  _shadow(shadow) {
+}
+
+/**
+ * Returns the type of texture this image samples.
+ */
+INLINE Texture::TextureType ShaderType::SampledImage::
+get_texture_type() const {
+  return _texture_type;
+}
+
+/**
+ * Returns the type of scalar that sampling this image produces.
+ */
+INLINE ShaderType::ScalarType ShaderType::SampledImage::
+get_sampled_type() const {
+  return _sampled_type;
+}
+
+/**
+ * Returns the type of scalar that sampling this image produces as a Scalar.
+ */
+INLINE const ShaderType::Scalar *ShaderType::SampledImage::
+get_sampled_type_obj() const {
+  return ShaderType::get_scalar_type_obj(_sampled_type);
+}
+
+/**
+ * Returns true if this sampler performs a depth comparison.
+ */
+INLINE bool ShaderType::SampledImage::
+is_shadow() const {
+  return _shadow;
+}
+
+/**
+ * Constructs a storage buffer type.
+ */
+INLINE ShaderType::StorageBuffer::
+StorageBuffer(const ShaderType *contained_type, Access access) :
+  _contained_type(contained_type),
+  _access(access) {
+}
+
+/**
+ * Returns the type contained within the buffer (usually a struct)
+ */
+INLINE const ShaderType *ShaderType::StorageBuffer::
+get_contained_type() const {
+  return _contained_type;
+}
+
+/**
+ * Returns the way this buffer is accessed.
+ */
+INLINE ShaderType::Access ShaderType::StorageBuffer::
+get_access() const {
+  return _access;
+}

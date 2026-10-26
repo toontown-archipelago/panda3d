@@ -22,6 +22,8 @@
 #include "lightMutex.h"
 #include "patomic.h"
 #include "small_vector.h"
+#include "completionToken.h"
+#include "vector_uchar.h"
 
 // A handful of forward references.
 
@@ -31,6 +33,7 @@ class GraphicsWindow;
 class NodePath;
 class GraphicsOutputBase;
 class ScreenshotRequest;
+class AsyncFuture;
 
 class VertexBufferContext;
 class IndexBufferContext;
@@ -51,6 +54,7 @@ class GeomLines;
 class GeomLinestrips;
 class GeomPoints;
 class GeomMunger;
+class InstanceList;
 
 class SceneSetup;
 class PreparedGraphicsObjects;
@@ -122,7 +126,9 @@ PUBLISHED:
   virtual int get_max_texture_dimension() const=0;
   virtual bool get_supports_compressed_texture_format(int compression_mode) const=0;
 
+  virtual bool get_supports_fixed_function_vertex_blending() const=0;
   virtual bool get_supports_multisample() const=0;
+  virtual uint64_t get_supported_shader_capabilities() const=0;
   virtual int get_supported_geom_rendering() const=0;
   virtual bool get_supports_shadow_filter() const=0;
 
@@ -149,6 +155,7 @@ public:
 
   virtual TextureContext *prepare_texture(Texture *tex)=0;
   virtual bool update_texture(TextureContext *tc, bool force)=0;
+  virtual bool update_texture(TextureContext *tc, bool force, CompletionToken token)=0;
   virtual void release_texture(TextureContext *tc)=0;
   virtual void release_textures(const pvector<TextureContext *> &contexts)=0;
   virtual bool extract_texture_data(Texture *tex)=0;
@@ -173,6 +180,9 @@ public:
   virtual BufferContext *prepare_shader_buffer(ShaderBuffer *data)=0;
   virtual void release_shader_buffer(BufferContext *ibc)=0;
   virtual void release_shader_buffers(const pvector<BufferContext *> &contexts)=0;
+  virtual void async_extract_shader_buffer_data(ShaderBuffer *buffer, vector_uchar &data,
+                                                size_t start = 0, size_t size = (size_t)-1,
+                                                CompletionToken token = CompletionToken())=0;
 
   virtual void dispatch_compute(int size_x, int size_y, int size_z)=0;
 
@@ -181,6 +191,8 @@ public:
 
   virtual void set_state_and_transform(const RenderState *state,
                                        const TransformState *transform)=0;
+
+  virtual bool state_supports_instancing() const=0;
 
   // This function may only be called during a render traversal; it will
   // compute the distance to the indicated point, assumed to be in eye
@@ -206,7 +218,7 @@ public:
 
   virtual bool begin_draw_primitives(const GeomPipelineReader *geom_reader,
                                      const GeomVertexDataPipelineReader *data_reader,
-                                     size_t num_instances, bool force)=0;
+                                     const InstanceList *instances, bool force)=0;
   virtual bool draw_triangles(const GeomPrimitivePipelineReader *reader, bool force)=0;
   virtual bool draw_triangles_adj(const GeomPrimitivePipelineReader *reader, bool force)=0;
   virtual bool draw_tristrips(const GeomPrimitivePipelineReader *reader, bool force)=0;
@@ -226,6 +238,7 @@ public:
   (Texture *tex, int view, int z, const DisplayRegion *dr, const RenderBuffer &rb,
    ScreenshotRequest *request = nullptr)=0;
 
+  INLINE CoordinateSystem get_coordinate_system() const { return _coordinate_system; }
   virtual CoordinateSystem get_internal_coordinate_system() const=0;
 
   virtual void bind_light(PointLight *light_obj, const NodePath &light,
@@ -238,12 +251,10 @@ public:
   virtual void ensure_generated_shader(const RenderState *state)=0;
 
   static void mark_rehash_generated_shaders() {
-#ifdef HAVE_CG
     ++_generated_shader_seq;
-#endif
   }
 
-  virtual void push_group_marker(const std::string &marker) {}
+  virtual void push_group_marker(std::string_view marker) {}
   virtual void pop_group_marker() {}
 
 PUBLISHED:
@@ -259,6 +270,7 @@ public:
   static void remove_gsg(GraphicsStateGuardianBase *gsg);
 
   size_t _id;
+  size_t _max_vertex_shader_parameter_vectors = 0;
 
 private:
   struct GSGList {
@@ -272,6 +284,8 @@ private:
 
 protected:
   static UpdateSeq _generated_shader_seq;
+
+  CoordinateSystem _coordinate_system = CS_invalid;
 
 public:
   static TypeHandle get_class_type() {

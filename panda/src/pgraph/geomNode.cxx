@@ -52,8 +52,8 @@ TypeHandle GeomNode::_type_handle;
  *
  */
 GeomNode::
-GeomNode(const std::string &name) :
-  PandaNode(name)
+GeomNode(std::string name) :
+  PandaNode(std::move(name))
 {
   _preserved = preserve_geom_nodes;
 
@@ -538,10 +538,9 @@ add_for_draw(CullTraverser *trav, CullTraverserData &data) {
     if (!geom->is_empty()) {
       CPT(RenderState) state = data._state->compose(geoms.get_geom_state(0));
       if (!state->has_cull_callback() || state->cull_callback(trav, data)) {
-        CullableObject *object =
-          new CullableObject(std::move(geom), std::move(state), std::move(internal_transform));
-        object->_instances = data._instances;
-        trav->get_cull_handler()->record_object(object, trav);
+        CullableObject object(std::move(geom), std::move(state), std::move(internal_transform));
+        object._instances = data._instances;
+        trav->get_cull_handler()->record_object(std::move(object), trav);
       }
     }
   }
@@ -562,10 +561,9 @@ add_for_draw(CullTraverser *trav, CullTraverserData &data) {
       if (data._instances != nullptr) {
         // Draw each individual instance.  We don't bother culling each
         // individual Geom for each instance; that is probably way too slow.
-        CullableObject *object =
-          new CullableObject(std::move(geom), std::move(state), internal_transform);
-        object->_instances = data._instances;
-        trav->get_cull_handler()->record_object(object, trav);
+        CullableObject object(std::move(geom), std::move(state), internal_transform);
+        object._instances = data._instances;
+        trav->get_cull_handler()->record_object(std::move(object), trav);
         continue;
       }
 
@@ -588,9 +586,8 @@ add_for_draw(CullTraverser *trav, CullTraverserData &data) {
         }
       }
 
-      CullableObject *object =
-        new CullableObject(std::move(geom), std::move(state), internal_transform);
-      trav->get_cull_handler()->record_object(object, trav);
+      trav->get_cull_handler()->record_object(CullableObject(
+        std::move(geom), std::move(state), internal_transform), trav);
     }
   }
 }
@@ -1171,7 +1168,17 @@ complete_pointers(TypedWritable **p_list, BamReader *manager) {
  */
 void GeomNode::CData::
 fillin(DatagramIterator &scan, BamReader *manager) {
+  if (!manager->expect_remaining_size(scan, 2)) {
+    return;
+  }
+
   int num_geoms = scan.get_uint16();
+  if (!manager->expect_remaining_size(scan, num_geoms * 4)) {
+    // This catches an implausibly large number of geoms before we try to
+    // allocate a very large GeomList
+    return;
+  }
+
   // Read the list of geoms and states.  Push back a NULL for each one.
   PT(GeomList) geoms = new GeomList;
   geoms->reserve(num_geoms);

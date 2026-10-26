@@ -21,6 +21,13 @@
 
 #include <map>
 
+#if defined(__EMSCRIPTEN__) && !defined(CPPPARSER)
+extern "C" void EMSCRIPTEN_KEEPALIVE
+_set_env_var(const char *var, const char *value);
+extern "C" void EMSCRIPTEN_KEEPALIVE
+_set_binary_name(const char *path);
+#endif
+
 /**
  * Encapsulates access to the environment variables and command-line arguments
  * at the time of execution.  This is encapsulated to support accessing these
@@ -38,7 +45,7 @@ PUBLISHED:
   INLINE static void shadow_environment_variable(const std::string &var, const std::string &value);
   INLINE static void clear_shadow(const std::string &var);
 
-  static std::string expand_string(const std::string &str);
+  static std::string expand_string(std::string_view str);
 
   INLINE static size_t get_num_args();
   INLINE static std::string get_arg(size_t n);
@@ -46,8 +53,8 @@ PUBLISHED:
   INLINE static std::string get_binary_name();
   INLINE static std::string get_dtool_name();
 
-  INLINE static void set_binary_name(const std::string &name);
-  INLINE static void set_dtool_name(const std::string &name);
+  INLINE static void set_binary_name(std::string name);
+  INLINE static void set_dtool_name(std::string name);
 
   static Filename get_cwd();
 
@@ -89,6 +96,10 @@ private:
   std::string _dtool_name;
 
   static ExecutionEnvironment *_global_ptr;
+
+#ifdef __EMSCRIPTEN__
+  friend void ::_set_env_var(const char *var, const char *value);
+#endif
 };
 
 #include "executionEnvironment.I"

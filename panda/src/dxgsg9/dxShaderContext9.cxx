@@ -14,6 +14,11 @@
 #include "dxGraphicsStateGuardian9.h"
 #include "dxShaderContext9.h"
 #include "dxVertexBufferContext9.h"
+#include "shaderModuleSpirV.h"
+#include "spirVTransformer.h"
+#include "spirVEmulateTextureQueriesPass.h"
+#include "spirVHoistStructResourcesPass.h"
+#include "spirVRemoveUnusedVariablesPass.h"
 
 #include <io.h>
 #include <stdio.h>
@@ -22,9 +27,18 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#ifdef HAVE_CG
-#include <Cg/cgD3D9.h>
-#endif
+#include <spirv_cross/spirv_hlsl.hpp>
+
+// Temporary hack to allow spirv-cross to emit empty structs, which we need it
+// to do in order not to mess up our member numbering for structs that used to
+// contain samplers
+class Compiler : public spirv_cross::CompilerHLSL {
+public:
+  explicit Compiler(std::vector<uint32_t> spirv_)
+    : CompilerHLSL(std::move(spirv_)) {
+    backend.supports_empty_struct = true;
+  }
+};
 
 #define DEBUG_SHADER 0
 
@@ -35,47 +49,25 @@ TypeHandle DXShaderContext9::_type_handle;
  */
 DXShaderContext9::
 DXShaderContext9(Shader *s, GSG *gsg) : ShaderContext(s) {
-  _vertex_element_array = nullptr;
-  _vertex_declaration = nullptr;
-
-  _num_bound_streams = 0;
-
-  _name = s->get_filename();
-
-#ifdef HAVE_CG
-  CGcontext context = DCAST(DXGraphicsStateGuardian9, gsg)->_cg_context;
-
-  if (s->get_language() == Shader::SL_Cg) {
-    // Ask the shader to compile itself for us and to give us the resulting Cg
-    // program objects.
-    if (!s->cg_compile_for(gsg->_shader_caps, context,
-                           _cg_program, _cg_parameter_map)) {
-      return;
-    }
-
-    // Load the program.
-    DWORD assembly_flags = 0;
-#if DEBUG_SHADER
-    assembly_flags |= D3DXSHADER_DEBUG;
-#endif
-
-    HRESULT hr;
-    bool success = true;
-    hr = cgD3D9LoadProgram(_cg_program, FALSE, assembly_flags);
-    if (FAILED(hr)) {
+  DWORD *vs_data;
+  CPT(ShaderModule) vertex_module = s->get_module(Shader::Stage::VERTEX);
+  if (compile_module(vertex_module, vs_data)) {
+    HRESULT result = gsg->_d3d_device->CreateVertexShader(vs_data, &_vertex_shader);
+    if (FAILED(result)) {
       dxgsg9_cat.error()
-        << "cgD3D9LoadProgram failed " << D3DERRORSTRING(hr);
-
-      CGerror error = cgGetError();
-      if (error != CG_NO_ERROR) {
-        dxgsg9_cat.error() << "  CG ERROR: " << cgGetErrorString(error) << "\n";
-      }
-      release_resources();
+        << "Failed to create vertex shader: " << D3DERRORSTRING(result) << "\n";
     }
   }
-#endif
 
-  _mat_part_cache = new LVecBase4f[s->cp_get_mat_cache_size()];
+  DWORD *ps_data;
+  CPT(ShaderModule) fragment_module = s->get_module(Shader::Stage::FRAGMENT);
+  if (compile_module(fragment_module, ps_data)) {
+    HRESULT result = gsg->_d3d_device->CreatePixelShader(ps_data, &_pixel_shader);
+    if (FAILED(result)) {
+      dxgsg9_cat.error()
+        << "Failed to create pixel shader: " << D3DERRORSTRING(result) << "\n";
+    }
+  }
 }
 
 /**
@@ -84,18 +76,566 @@ DXShaderContext9(Shader *s, GSG *gsg) : ShaderContext(s) {
 DXShaderContext9::
 ~DXShaderContext9() {
   release_resources();
+}
 
-  if (_vertex_declaration != nullptr) {
-    _vertex_declaration->Release();
-    _vertex_declaration = nullptr;
+/**
+ * Compiles the given shader module.
+ */
+bool DXShaderContext9::
+compile_module(const ShaderModule *module, DWORD *&data) {
+  const ShaderModuleSpirV *spv;
+  DCAST_INTO_R(spv, module, false);
+
+  if (dxgsg9_cat.is_debug()) {
+    dxgsg9_cat.debug()
+      << "Transpiling SPIR-V " << spv->get_stage() << " shader "
+      << spv->get_source_filename() << "\n";
   }
 
-  if (_vertex_element_array != nullptr) {
-    delete _vertex_element_array;
-    _vertex_element_array = nullptr;
+  // Create a mapping from id to a new name, a string containing a parameter
+  // index.  This makes reflection a little easier later on.
+  bool hoist_necessary = false;
+  pmap<uint32_t, std::string> param_names;
+  for (size_t i = 0; i < module->get_num_parameters(); ++i) {
+    const ShaderModule::Variable &var = module->get_parameter(i);
+
+    if (!hoist_necessary &&
+        var.type->is_aggregate_type() &&
+        var.type->get_num_resources() > 0) {
+      hoist_necessary = true;
+    }
+
+    for (size_t j = 0; j < _shader->_parameters.size(); ++j) {
+      if (_shader->_parameters[j]._name == var.name) {
+        param_names[var.id] = "p" + format_string(j);
+        break;
+      }
+    }
   }
 
-  delete[] _mat_part_cache;
+  ShaderModuleSpirV::InstructionStream stream = spv->_instructions;
+
+  // HLSL does not support resources inside a struct, so if they exist, we
+  // need to modify the SPIR-V to hoist those out.
+  // We tell it not to remove the empty structs, since that changes the member
+  // numbering, which we need to match between the original and the HLSL.
+  static const uint64_t emulate_caps = (Shader::C_texture_query_size | Shader::C_image_query_size | Shader::C_texture_query_levels);
+  if (hoist_necessary || (spv->_emulatable_caps & emulate_caps) != 0) {
+    SpirVTransformer transformer(stream);
+
+    if ((spv->_emulatable_caps & emulate_caps) != 0) {
+      SpirVEmulateTextureQueriesPass pass(emulate_caps);
+      transformer.run(pass);
+
+      for (const auto &item : pass._size_var_ids) {
+        const auto &access_chain = item.first;
+        const auto &param_name = param_names[access_chain._var_id];
+
+        // Determine the resource index within the parameter.
+        const Shader::Parameter &param = _shader->_parameters[atoi(param_name.c_str() + 1)];
+        const ShaderType *type = param._type;
+        int resource_index = 0;
+
+        for (size_t i = 0; i < access_chain.size(); ++i) {
+          uint32_t index = access_chain[i];
+          if (const ShaderType::Array *array_type = type->as_array()) {
+            type = array_type->get_element_type();
+            resource_index += index * type->get_num_resources();
+          }
+          else if (const ShaderType::Struct *struct_type = type->as_struct()) {
+            for (size_t mi = 0; mi < index; ++mi) {
+              resource_index += struct_type->get_member(mi).type->get_num_resources();
+            }
+            type = struct_type->get_member(index).type;
+          }
+          else {
+            nassert_raise("invalid access chain");
+          }
+        }
+
+
+        char buf[256];
+        size_t size = sprintf(buf, "%ss_r%d", param_name.c_str(), resource_index);
+        param_names[item.second] = std::string(buf, size);
+      }
+    }
+
+    if (hoist_necessary) {
+      SpirVHoistStructResourcesPass hoist_pass(false);
+      transformer.run(hoist_pass);
+
+      for (const auto &item : hoist_pass._hoisted_vars) {
+        // Note that this access chain contains only struct members.
+        const auto &access_chain = item.first;
+
+        std::ostringstream str;
+        str << param_names[access_chain._var_id];
+
+        for (size_t i = 0; i < access_chain.size(); ++i) {
+          str << '_' << access_chain[i];
+        }
+
+        param_names[item.second] = str.str();
+      }
+    }
+
+    // The query emulation and hoisting may have left variables without any
+    // remaining use.  In particular, an image variable that was only used for
+    // a size query must not survive to the HLSL emission, since SPIRV-Cross
+    // cannot express separate images in legacy HLSL.
+    transformer.run(SpirVRemoveUnusedVariablesPass());
+
+    stream = transformer.get_result();
+#ifndef NDEBUG
+    if (!stream.validate()) {
+      return false;
+    }
+#endif
+  }
+
+  // We have to strip this if not supported, else SPIRV-Cross chokes on it.
+  if (spv->_emulatable_caps & Shader::C_debug_output) {
+    uint32_t debug_printf_import = 0;
+    for (auto it = stream.begin(); it != stream.end();) {
+      ShaderModuleSpirV::Instruction op = *it;
+
+      if (op.opcode == spv::OpExtInstImport && strcmp((const char*)&op.args[1], "NonSemantic.DebugPrintf") == 0) {
+        debug_printf_import = op.args[0];
+        it = stream.erase(it);
+      }
+      else if (op.opcode == spv::OpExtInst && debug_printf_import == op.args[2]) {
+        it = stream.erase(it);
+      }
+      else {
+        ++it;
+      }
+    }
+  }
+
+  Compiler compiler(stream);
+  spirv_cross::CompilerHLSL::Options options;
+  options.shader_model = 30;
+  options.flatten_matrix_vertex_input_semantics = true;
+  options.point_size_compat = false;
+  options.point_coord_compat = true;
+  compiler.set_hlsl_options(options);
+
+  // Bind certain known attributes to specific semantics.
+  int texcoord_index = 0;
+  for (const Shader::VertexInputBinding &spec : _shader->_vertex_inputs) {
+    uint32_t idx = (uint32_t)spec._id._location;
+    if (spec._name == InternalName::get_vertex()) {
+      compiler.add_vertex_attribute_remap({idx, "POSITION"});
+    }
+    else if (spec._name == InternalName::get_transform_weight()) {
+      compiler.add_vertex_attribute_remap({idx, "BLENDWEIGHT"});
+    }
+    else if (spec._name == InternalName::get_transform_index()) {
+      compiler.add_vertex_attribute_remap({idx, "BLENDINDICES"});
+    }
+    else if (spec._name == InternalName::get_normal()) {
+      compiler.add_vertex_attribute_remap({idx, "NORMAL"});
+    }
+    else if (spec._name == InternalName::get_tangent()) {
+      compiler.add_vertex_attribute_remap({idx, "TANGENT"});
+    }
+    else if (spec._name == InternalName::get_binormal()) {
+      compiler.add_vertex_attribute_remap({idx, "BINORMAL"});
+    }
+    else if (spec._name == InternalName::get_color()) {
+      compiler.add_vertex_attribute_remap({idx, "COLOR"});
+    }
+    else if (spec._name == InternalName::get_size()) {
+      compiler.add_vertex_attribute_remap({idx, "PSIZE"});
+    }
+    else {
+      // The rest gets mapped to TEXCOORD + location.
+      for (size_t i = 0; i < spec._elements; ++i) {
+        char buffer[16];
+        sprintf(buffer, "TEXCOORD%d", (int)texcoord_index);
+        compiler.add_vertex_attribute_remap({idx, buffer});
+        ++texcoord_index;
+        ++idx;
+      }
+    }
+  }
+
+  // Tell spirv-cross to rename the constants to "p#", where # is the index of
+  // the original parameter.  This makes it easier to map the compiled
+  // constants back to the original parameters later on.
+  for (spirv_cross::VariableID id : compiler.get_active_interface_variables()) {
+    spv::StorageClass sc = compiler.get_storage_class(id);
+
+    if (sc == spv::StorageClassUniformConstant) {
+      auto it = param_names.find(id);
+      nassertd(it != param_names.end()) continue;
+      compiler.set_name(id, it->second);
+    }
+  }
+
+  // Optimize out unused variables.
+  compiler.set_enabled_interface_variables(compiler.get_active_interface_variables());
+
+  std::string code = compiler.compile();
+
+  if (dxgsg9_cat.is_debug()) {
+    dxgsg9_cat.debug()
+      << "SPIRV-Cross compilation resulted in HLSL shader:\n"
+      << code << "\n";
+  }
+
+  const char *profile;
+  switch (spv->get_stage()) {
+  case Shader::Stage::VERTEX:
+    profile = "vs_3_0";
+    break;
+
+  case Shader::Stage::FRAGMENT:
+    profile = "ps_3_0";
+    break;
+
+  default:
+    return false;
+  }
+
+  ID3DXBuffer *shader;
+  ID3DXBuffer *errors;
+  HRESULT result = D3DXCompileShader(code.c_str(), code.size(), nullptr, nullptr, "main", profile, D3DXSHADER_PACKMATRIX_ROWMAJOR, &shader, &errors, nullptr);
+  if (SUCCEEDED(result)) {
+    nassertr(shader != nullptr, false);
+    data = (DWORD *)shader->GetBufferPointer();
+
+#ifndef NDEBUG
+    if (dxgsg9_cat.is_debug()) {
+      std::ostream &out = dxgsg9_cat.debug()
+        << "Disassembly of compiled " << profile << " module:\n";
+      LPD3DXBUFFER dis;
+      if (SUCCEEDED(D3DXDisassembleShader(data, FALSE, NULL, &dis))) {
+        out << (char *)dis->GetBufferPointer();
+        dis->Release();
+      }
+    }
+#endif
+
+    if (errors != nullptr) {
+      errors->Release();
+    }
+
+    return query_constants(module, data);
+  }
+  else {
+    dxgsg9_cat.error()
+      << "Failed to compile " << module->get_stage() << " shader ("
+      << DXGetErrorString(result) << "):\n";
+
+    if (errors != nullptr) {
+      std::string messages((const char *)errors->GetBufferPointer(), errors->GetBufferSize());
+      dxgsg9_cat.error(false) << messages << "\n";
+      errors->Release();
+    }
+    return false;
+  }
+}
+
+/**
+ * Walks the constant table.
+ */
+bool DXShaderContext9::
+query_constants(const ShaderModule *module, DWORD *data) {
+  if (memcmp(data + 2, "CTAB", 4) != 0) {
+    dxgsg9_cat.error()
+      << "Could not find constant table!\n";
+    return false;
+  }
+
+  BYTE *table_data = (BYTE *)(data + 3);
+  D3DXSHADER_CONSTANTTABLE *table = (D3DXSHADER_CONSTANTTABLE *)table_data;
+  D3DXSHADER_CONSTANTINFO *constants = (D3DXSHADER_CONSTANTINFO *)(table_data + table->ConstantInfo);
+
+  if (dxgsg9_cat.is_debug()) {
+    if (table->Constants != 0) {
+      dxgsg9_cat.debug()
+        << "Constant table for compiled " << *module << ":\n";
+    } else {
+      dxgsg9_cat.debug()
+        << "Empty constant table for compiled " << *module << "\n";
+    }
+  }
+
+  struct SizeInput {
+    const Shader::Parameter &param;
+    int resource_index;
+    UINT reg;
+  };
+  pvector<SizeInput> size_inputs;
+
+  Shader::Stage stage = module->get_stage();
+
+  for (DWORD ci = 0; ci < table->Constants; ++ci) {
+    D3DXSHADER_CONSTANTINFO &constant = constants[ci];
+    D3DXSHADER_TYPEINFO *type = (D3DXSHADER_TYPEINFO *)(table_data + constant.TypeInfo);
+
+    // We renamed the constants to p# earlier on, so extract the original
+    // parameter index.
+    const char *name = (const char *)(table_data + constant.Name);
+    if (name[0] != 'p') {
+      if (stage == Shader::Stage::VERTEX && strcmp(name, "gl_HalfPixel") == 0) {
+        // This is a special input generated by spirv-cross.
+        _half_pixel_register = constant.RegisterIndex;
+        continue;
+      }
+      dxgsg9_cat.warning()
+        << "Ignoring unknown " << stage << " shader constant " << name << "\n";
+      continue;
+    }
+    char *suffix;
+    long index = strtol(name + 1, &suffix, 10);
+    const Shader::Parameter &param = _shader->_parameters[index];
+
+#ifndef NDEBUG
+    if (dxgsg9_cat.is_debug()) {
+      const char sets[] = {'b', 'i', 'c', 's'};
+      if (type->Class == D3DXPC_STRUCT) {
+        dxgsg9_cat.debug()
+          << "  struct " << name << "[" << type->Elements << "] (" << *param._name
+          << ") at register " << sets[constant.RegisterSet]
+          << constant.RegisterIndex;
+      } else {
+        const char *types[] = {"void", "bool", "int", "float", "string", "texture", "texture1D", "texture2D", "texture3D", "textureCUBE", "sampler", "sampler1D", "sampler2D", "sampler3D", "samplerCUBE"};
+        dxgsg9_cat.debug()
+          << "  " << ((type->Type <= D3DXPT_SAMPLERCUBE) ? types[type->Type] : "unknown")
+          << " " << name << "[" << type->Elements << "] (" << *param._name
+          << ") at register " << sets[constant.RegisterSet]
+          << constant.RegisterIndex;
+      }
+      if (constant.RegisterCount > 1) {
+        dxgsg9_cat.debug(false)
+          << ".." << (constant.RegisterIndex + constant.RegisterCount - 1);
+      }
+      dxgsg9_cat.debug(false) << std::endl;
+    }
+#endif
+
+    if (suffix[0] == 's') {
+      // Texture size input, named like p0s_r2
+      int resource_index = atoi(suffix + 3);
+      size_inputs.push_back({param, resource_index, constant.RegisterIndex});
+      continue;
+    }
+
+    int reg_set = constant.RegisterSet;
+    int reg_idx = constant.RegisterIndex;
+    int reg_end = reg_idx + constant.RegisterCount;
+    if (reg_set != D3DXRS_SAMPLER) {
+      size_t offset = (size_t)-1;
+      if (param._binding != nullptr) {
+        // If there is no binding yet for this parameter, add it.
+        for (const Binding &binding : _data_bindings) {
+          if (param._binding == binding._binding) {
+            offset = binding._offset;
+          }
+        }
+        if (offset == (size_t)-1) {
+          offset = _scratch_space_size;
+
+          Binding binding;
+          binding._binding = param._binding;
+          binding._offset = offset;
+          binding._dep = param._binding->get_state_dep();
+          _constant_deps |= binding._dep;
+          _data_bindings.push_back(std::move(binding));
+
+          // Pad space to 16-byte boundary, since DX9 wants everything as a
+          // vec4, and otherwise we may end up copying out-of-bounds data if
+          // the last field is smaller than a vec4.
+          uint32_t size = param._type->get_size_bytes();
+          size = (size + 15) & ~15;
+          _scratch_space_size += size;
+        }
+      }
+
+      if (!r_query_constants(stage, param, param._type, offset, table_data, *type, reg_set, reg_idx, reg_end)) {
+        return false;
+      }
+    } else {
+      if (!r_query_resources(stage, param, param._type, suffix, 0, reg_set, reg_idx, reg_end)) {
+        return false;
+      }
+    }
+  }
+
+  for (const SizeInput &input : size_inputs) {
+    uint64_t resource_id = input.param._binding->get_resource_id(input.resource_index);
+
+    bool found_treg = false;
+    for (TextureRegister &treg : _textures) {
+      if (treg.binding == input.param._binding && treg.resource_id == resource_id) {
+        if (stage == Shader::Stage::VERTEX) {
+          if (treg.size_vreg >= 0) {
+            continue;
+          }
+          treg.size_vreg = input.reg;
+        }
+        if (stage == Shader::Stage::FRAGMENT) {
+          if (treg.size_freg >= 0) {
+            continue;
+          }
+          treg.size_freg = input.reg;
+        }
+        found_treg = true;
+        break;
+      }
+    }
+
+    if (!found_treg) {
+      // We have a size input for a texture that got optimized out.
+      // Generate a dummy texture register for this.
+      int vreg = (stage == Shader::Stage::VERTEX) ? input.reg : -1;
+      int freg = (stage == Shader::Stage::FRAGMENT) ? input.reg : -1;
+      _textures.push_back({(UINT)-1, input.param._binding, resource_id, vreg, freg});
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Recursive method used by query_constants.
+ */
+bool DXShaderContext9::
+r_query_constants(Shader::Stage stage, const Shader::Parameter &param,
+                  const ShaderType *type, size_t offset,
+                  BYTE *table_data, D3DXSHADER_TYPEINFO &typeinfo,
+                  int reg_set, int &reg_idx, int reg_end) {
+  if (typeinfo.Class == D3DXPC_STRUCT) {
+    int stride = 0;
+    const ShaderType *element_type = type;
+    if (const ShaderType::Array *array_type = type->as_array()) {
+      element_type = array_type->get_element_type();
+      stride = array_type->get_stride_bytes();
+    }
+
+    const ShaderType::Struct *struct_type = element_type->as_struct();
+    nassertr(struct_type != nullptr, false);
+
+    D3DXSHADER_STRUCTMEMBERINFO *members = (D3DXSHADER_STRUCTMEMBERINFO *)(table_data + typeinfo.StructMemberInfo);
+
+    if (reg_idx < reg_end && typeinfo.StructMembers == 1 &&
+        ((D3DXSHADER_TYPEINFO *)(table_data + members[0].TypeInfo))->Elements == 1 &&
+        strcmp((const char *)(table_data + members[0].Name), "empty_struct_member") == 0) {
+      // Special case of spirv-cross inventing a struct member where it does
+      // not exist.  Increment the register index and skip.
+      ++reg_idx;
+      return true;
+    }
+
+    for (WORD ei = 0; ei < typeinfo.Elements && reg_idx < reg_end; ++ei) {
+      DWORD dxmi = 0;
+      for (size_t mi = 0; mi < struct_type->get_num_members() && reg_idx < reg_end && dxmi < typeinfo.StructMembers; ++mi) {
+        const ShaderType::Struct::Member &member = struct_type->get_member(mi);
+
+        // Check if this is a resource or an array of resources.  If so, it was
+        // removed by the hoisting pass, and so we have to skip it.
+        const ShaderType *element_type = member.type;
+        while (const ShaderType::Array *array_type = element_type->as_array()) {
+          element_type = array_type->get_element_type();
+        }
+        if (element_type->as_resource() != nullptr) {
+          continue;
+        }
+
+        //const char *name = (const char *)(table_data + members[dxmi].Name);
+        D3DXSHADER_TYPEINFO *typeinfo = (D3DXSHADER_TYPEINFO *)(table_data + members[dxmi].TypeInfo);
+        if (!r_query_constants(stage, param, member.type, offset + member.offset, table_data, *typeinfo, reg_set, reg_idx, reg_end)) {
+          return false;
+        }
+        ++dxmi;
+      }
+
+      offset += stride;
+    }
+  } else {
+    // Non-aggregate type.  Note that arrays of arrays are not supported.
+    //nassertr(!element_type->is_aggregate_type(), false);
+
+    // Note that RegisterCount may be lower than Rows * Elements if the
+    // optimizer decided that eg. the last row of a matrix is not used!
+
+    ConstantRegister reg;
+    reg.set = (D3DXREGISTER_SET)reg_set;
+    reg.reg = reg_idx;
+    reg.count = std::min((UINT)typeinfo.Elements * typeinfo.Rows, (UINT)(reg_end - reg_idx));
+    reg.dep = param._binding ? param._binding->get_state_dep() : 0;
+    reg.offset = offset;
+
+    // Regularly, ints and bools actually get mapped to a float constant
+    // register, so we need to do an extra conversion step.
+    reg.convert = (reg.set == D3DXRS_FLOAT4 && typeinfo.Type != D3DXPT_FLOAT);
+
+    if (stage == Shader::Stage::VERTEX) {
+      _vertex_constants.push_back(std::move(reg));
+    }
+    if (stage == Shader::Stage::FRAGMENT) {
+      _pixel_constants.push_back(std::move(reg));
+    }
+
+    reg_idx += typeinfo.Elements * typeinfo.Rows;
+  }
+
+  return true;
+}
+
+/**
+ * Recursive method used by query_constants, identifying the resources used in
+ * the shader.  The resources that are hoisted from structs will be named
+ * something like p0_1_2_3, where p0 indicates the parameter index, and the
+ * next indices identify the struct member indices to traverse down into.
+ */
+bool DXShaderContext9::
+r_query_resources(Shader::Stage stage, const Shader::Parameter &param,
+                  const ShaderType *type, const char *path, int resource_index,
+                  int reg_set, int &reg_idx, int reg_end) {
+
+  if (const ShaderType::Array *array_type = type->as_array()) {
+    const ShaderType *element_type = array_type->get_element_type();
+    int stride = element_type->get_num_resources();
+
+    for (size_t i = 0; i < array_type->get_num_elements() && reg_idx < reg_end; ++i) {
+      if (!r_query_resources(stage, param, element_type, path, resource_index, reg_set, reg_idx, reg_end)) {
+        return false;
+      }
+      resource_index += stride;
+    }
+  }
+  else if (const ShaderType::Struct *struct_type = type->as_struct()) {
+    nassertr(path[0] == '_', false);
+
+    char *suffix;
+    long member_index = strtol(path + 1, &suffix, 10);
+    nassertr(member_index >= 0 && member_index < struct_type->get_num_members(), false);
+
+    for (long i = 0; i < member_index; ++i) {
+      const ShaderType *member_type = struct_type->get_member(i).type;
+      resource_index += member_type->get_num_resources();
+    }
+
+    const ShaderType *member_type = struct_type->get_member(member_index).type;
+    return r_query_resources(stage, param, member_type, suffix, resource_index, reg_set, reg_idx, reg_end);
+  }
+  else if (const ShaderType::Resource *resource_type = type->as_resource()) {
+    nassertr(path[0] == '\0', false);
+
+    if (reg_idx < reg_end) {
+      TextureRegister reg;
+      reg.unit = reg_idx;
+      reg.binding = param._binding;
+      reg.resource_id = param._binding->get_resource_id(resource_index);
+      _textures.push_back(std::move(reg));
+      ++reg_idx;
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -104,18 +644,19 @@ DXShaderContext9::
  */
 void DXShaderContext9::
 release_resources() {
-#ifdef HAVE_CG
-  if (_cg_program) {
-    cgDestroyProgram(_cg_program);
-    _cg_program = 0;
-    _cg_parameter_map.clear();
+  if (_vertex_shader != nullptr) {
+    _vertex_shader->Release();
+    _vertex_shader = nullptr;
   }
-#endif
+  if (_pixel_shader != nullptr) {
+    _pixel_shader->Release();
+    _pixel_shader = nullptr;
+  }
 
-  // I think we need to call SetStreamSource for _num_bound_streams --
-  // basically the logic from disable_shader_vertex_arrays -- but to do that
-  // we need to introduce logic like the GL code has to manage _last_gsg, so
-  // we can get at the device.  Sigh.
+  for (const auto &it : _vertex_declarations) {
+    it.second.first->Release();
+  }
+  _vertex_declarations.clear();
 }
 
 /**
@@ -124,37 +665,36 @@ release_resources() {
  */
 bool DXShaderContext9::
 bind(GSG *gsg) {
-  bool bind_state = false;
-
-#ifdef HAVE_CG
-  if (_cg_program) {
-    // clear the last cached FVF to make sure the next SetFVF call goes
-    // through
-
-    gsg->_last_fvf = 0;
-
-    // Pass in k-parameters and transform-parameters
-    issue_parameters(gsg, Shader::SSD_general);
-
-    HRESULT hr;
-
-    // Bind the shaders.
-    bind_state = true;
-    hr = cgD3D9BindProgram(_cg_program);
-    if (FAILED(hr)) {
-      dxgsg9_cat.error() << "cgD3D9BindProgram failed " << D3DERRORSTRING(hr);
-
-      CGerror error = cgGetError();
-      if (error != CG_NO_ERROR) {
-        dxgsg9_cat.error() << "  CG ERROR: " << cgGetErrorString(error) << "\n";
-      }
-
-      bind_state = false;
-    }
+  if (!valid(gsg)) {
+    return false;
   }
-#endif
 
-  return bind_state;
+  // clear the last cached FVF to make sure the next SetFVF call goes
+  // through
+  gsg->_last_fvf = 0;
+
+  // Bind the shaders.
+  HRESULT result;
+  result = gsg->_d3d_device->SetVertexShader(_vertex_shader);
+  if (FAILED(result)) {
+    dxgsg9_cat.error() << "SetVertexShader failed " << D3DERRORSTRING(result);
+    return false;
+  }
+
+  result = gsg->_d3d_device->SetPixelShader(_pixel_shader);
+  if (FAILED(result)) {
+    dxgsg9_cat.error() << "SetPixelShader failed " << D3DERRORSTRING(result);
+    gsg->_d3d_device->SetVertexShader(nullptr);
+    return false;
+  }
+
+  //TODO: what should we set this to?
+  if (_half_pixel_register >= 0) {
+    const float data[4] = {0, 0, 0, 0};
+    gsg->_d3d_device->SetVertexShaderConstantF(_half_pixel_register, data, 1);
+  }
+
+  return true;
 }
 
 /**
@@ -162,16 +702,8 @@ bind(GSG *gsg) {
  */
 void DXShaderContext9::
 unbind(GSG *gsg) {
-#ifdef HAVE_CG
-  if (_cg_program) {
-    HRESULT hr;
-    hr = cgD3D9UnbindProgram(_cg_program);
-    if (FAILED(hr)) {
-      dxgsg9_cat.error()
-        << "cgD3D9UnbindProgram failed " << D3DERRORSTRING(hr);
-    }
-  }
-#endif
+  gsg->_d3d_device->SetVertexShader(nullptr);
+  gsg->_d3d_device->SetPixelShader(nullptr);
 }
 
 /**
@@ -186,410 +718,91 @@ unbind(GSG *gsg) {
  */
 void DXShaderContext9::
 issue_parameters(GSG *gsg, int altered) {
-#ifdef HAVE_CG
-  if (_cg_program) {
+  if (!valid(gsg)) {
+    return;
+  }
 
-    // Iterate through _ptr parameters
-    for (size_t i = 0; i < _shader->_ptr_spec.size(); ++i) {
-      const Shader::ShaderPtrSpec &spec = _shader->_ptr_spec[i];
+  nassertv(gsg->_target_shader != nullptr);
 
-      if (altered & (spec._dep[0] | spec._dep[1])) {
-        const Shader::ShaderPtrData *ptr_data = gsg->fetch_ptr_parameter(spec);
+  LPDIRECT3DDEVICE9 device = gsg->_d3d_device;
 
-        if (ptr_data == nullptr) { //the input is not contained in ShaderPtrData
-          release_resources();
-          return;
-        }
+  if (altered & _constant_deps) {
+    unsigned char *scratch = (unsigned char *)alloca(_scratch_space_size);
 
-        // Calculate how many elements to transfer; no more than it expects,
-        // but certainly no more than we have.
-        int input_size = std::min(abs(spec._dim[0] * spec._dim[1] * spec._dim[2]), (int)ptr_data->_size);
+    ShaderInputBinding::State state;
+    state.gsg = gsg;
+    state.matrix_cache = &gsg->_matrix_cache[0];
 
-        CGparameter p = _cg_parameter_map[spec._id._seqno];
-        switch (ptr_data->_type) {
-        case Shader::SPT_int:
-          cgSetParameterValueic(p, input_size, (int *)ptr_data->_ptr);
-          break;
-
-        case Shader::SPT_double:
-          cgSetParameterValuedc(p, input_size, (double *)ptr_data->_ptr);
-          break;
-
-        case Shader::SPT_float:
-          cgSetParameterValuefc(p, input_size, (float *)ptr_data->_ptr);
-          break;
-
-        default:
-          dxgsg9_cat.error()
-            << spec._id._name << ": unrecognized parameter type\n";
-          release_resources();
-          return;
-        }
+    for (const Binding &binding : _data_bindings) {
+      if (altered & binding._dep) {
+        binding._binding->fetch_data(state, scratch + binding._offset, false);
       }
     }
 
-    if (altered & _shader->_mat_deps) {
-      gsg->update_shader_matrix_cache(_shader, _mat_part_cache, altered);
+    for (const ConstantRegister &reg : _vertex_constants) {
+      if ((altered & reg.dep) == 0) {
+        continue;
+      }
 
-      for (Shader::ShaderMatSpec &spec : _shader->_mat_spec) {
-        if ((altered & spec._dep) == 0) {
-          continue;
-        }
+      const void *data = scratch + reg.offset;
 
-        CGparameter p = _cg_parameter_map[spec._id._seqno];
-        if (p == nullptr) {
-          continue;
-        }
-
-        const LVecBase4f *val = gsg->fetch_specified_value(spec, _mat_part_cache, altered);
-        if (val) {
-          const float *data = (const float *)val + spec._offset;
-          LVecBase4f v;
-          LMatrix4f temp_matrix;
-          LMatrix3f temp_matrix3;
-
-          switch (spec._piece) {
-          case Shader::SMP_mat4_whole:
-            // TRANSPOSE REQUIRED
-            temp_matrix.transpose_from(*(const LMatrix4f *)data);
-            data = temp_matrix.get_data();
-            break;
-
-          case Shader::SMP_mat4_column:
-            v.set(data[0], data[4], data[8], data[12]);
-            data = v.get_data();
-            break;
-
-          case Shader::SMP_mat4_upper3x3:
-            // TRANSPOSE REQUIRED
-            temp_matrix3.set(data[0], data[4], data[8], data[1], data[5], data[9], data[2], data[6], data[10]);
-            data = temp_matrix3.get_data();
-            break;
-
-          case Shader::SMP_mat4_transpose3x3:
-            // NO TRANSPOSE REQUIRED
-            temp_matrix3.set(data[0], data[1], data[2], data[4], data[5], data[6], data[8], data[9], data[10]);
-            data = temp_matrix3.get_data();
-            break;
-
-          default:
-            break;
-          }
-
-          HRESULT hr = cgD3D9SetUniform(p, data);
-          if (FAILED(hr)) {
-            std::string name = "unnamed";
-
-            if (spec._arg[0]) {
-              name = spec._arg[0]->get_basename();
-            }
-
-            dxgsg9_cat.error()
-              << "NAME  " << name << "\n" << "MAT TYPE  " << spec._piece
-              << " cgD3D9SetUniform failed " << D3DERRORSTRING(hr);
-
-            CGerror error = cgGetError();
-            if (error != CG_NO_ERROR) {
-              dxgsg9_cat.error() << "  CG ERROR: " << cgGetErrorString(error) << "\n";
-            }
+      switch (reg.set) {
+      case D3DXRS_FLOAT4:
+        if (reg.convert) {
+          for (UINT i = 0; i < reg.count; ++i) {
+            LVecBase4i from = ((LVecBase4i *)data)[i];
+            ((LVecBase4f *)data)[i] = LCAST(float, from);
           }
         }
+        device->SetVertexShaderConstantF(reg.reg, (const float *)data, reg.count);
+        break;
+
+      case D3DXRS_INT4:
+        device->SetVertexShaderConstantI(reg.reg, (const int *)data, reg.count);
+        break;
+
+      case D3DXRS_BOOL:
+        device->SetVertexShaderConstantB(reg.reg, (const BOOL *)data, reg.count);
+        break;
+      }
+    }
+
+    for (const ConstantRegister &reg : _pixel_constants) {
+      if ((altered & reg.dep) == 0) {
+        continue;
+      }
+
+      const void *data = scratch + reg.offset;
+
+      switch (reg.set) {
+      case D3DXRS_FLOAT4:
+        if (reg.convert) {
+          for (UINT i = 0; i < reg.count; ++i) {
+            LVecBase4i from = ((LVecBase4i *)data)[i];
+            ((LVecBase4f *)data)[i] = LCAST(float, from);
+          }
+        }
+        device->SetPixelShaderConstantF(reg.reg, (const float *)data, reg.count);
+        break;
+
+      case D3DXRS_INT4:
+        device->SetPixelShaderConstantI(reg.reg, (const int *)data, reg.count);
+        break;
+
+      case D3DXRS_BOOL:
+        device->SetPixelShaderConstantB(reg.reg, (const BOOL *)data, reg.count);
+        break;
       }
     }
   }
-#endif
 }
 
 /**
- * Disable all the vertex arrays used by this shader.
+ * Changes the active transform and slider table, used for hardware skinning.
  */
 void DXShaderContext9::
-disable_shader_vertex_arrays(GSG *gsg) {
-  LPDIRECT3DDEVICE9 device = gsg->_screen->_d3d_device;
-
-  for (int array_index = 0; array_index < _num_bound_streams; ++array_index) {
-    device->SetStreamSource(array_index, nullptr, 0, 0);
-  }
-  _num_bound_streams = 0;
-}
-
-/**
- * Disables all vertex arrays used by the previous shader, then enables all
- * the vertex arrays needed by this shader.  Extracts the relevant vertex
- * array data from the gsg.  The current implementation is inefficient,
- * because it may unnecessarily disable arrays then immediately reenable them.
- * We may optimize this someday.
- */
-bool DXShaderContext9::
-update_shader_vertex_arrays(DXShaderContext9 *prev, GSG *gsg, bool force) {
-  if (prev) prev->disable_shader_vertex_arrays(gsg);
-#ifdef HAVE_CG
-  if (!_cg_program) {
-    return true;
-  }
-
-#ifdef SUPPORT_IMMEDIATE_MODE
-/*
-    if (gsg->_use_sender) {
-      dxgsg9_cat.error() << "immediate mode shaders not implemented yet\n";
-    } else
-*/
-#endif // SUPPORT_IMMEDIATE_MODE
-  {
-    int nvarying = _shader->_var_spec.size();
-    LPDIRECT3DDEVICE9 device = gsg->_screen->_d3d_device;
-    HRESULT hr;
-
-    // Discard and recreate the VertexElementArray.  This thrashes pretty
-    // bad....
-    if (_vertex_element_array != nullptr) {
-      delete _vertex_element_array;
-    }
-    _vertex_element_array = new VertexElementArray(nvarying + 2);
-    VertexElementArray* vertex_element_array = _vertex_element_array;
-
-    // Experimentally determined that DX doesn't like us crossing the streams!
-    // It seems to be okay with out-of-order offsets in both source and
-    // destination, but it wants all stream X entries grouped together, then
-    // all stream Y entries, etc.  To accomplish this out outer loop processes
-    // arrays ("streams"), and we repeatedly iterate the parameters to pull
-    // out only those for a single stream.
-
-    bool apply_white_color = false;
-
-    int number_of_arrays = gsg->_data_reader->get_num_arrays();
-    for (int array_index = 0; array_index < number_of_arrays; ++array_index) {
-      const GeomVertexArrayDataHandle* array_reader =
-        gsg->_data_reader->get_array_reader(array_index);
-      if (array_reader == nullptr) {
-        dxgsg9_cat.error() << "Unable to get reader for array " << array_index << "\n";
-        continue;
-      }
-
-      for (int var_index = 0; var_index < nvarying; ++var_index) {
-        CGparameter p = _cg_parameter_map[_shader->_var_spec[var_index]._id._seqno];
-        if (p == nullptr) {
-          dxgsg9_cat.info() <<
-            "No parameter in map for parameter " << var_index <<
-            " (probably optimized away)\n";
-          continue;
-        }
-
-        InternalName *name = _shader->_var_spec[var_index]._name;
-
-        // This is copied from the GL version of this function, and I've yet
-        // to 100% convince myself that it works properly....
-        int texslot = _shader->_var_spec[var_index]._append_uv;
-        if (texslot >= 0 && texslot < gsg->_state_texture->get_num_on_stages()) {
-          TextureStage *stage = gsg->_state_texture->get_on_stage(texslot);
-          InternalName *texname = stage->get_texcoord_name();
-          if (name == InternalName::get_texcoord()) {
-            name = texname;
-          } else if (texname != InternalName::get_texcoord()) {
-            name = name->append(texname->get_basename());
-          }
-        }
-
-        if (name == InternalName::get_color() && !gsg->_vertex_colors_enabled) {
-          apply_white_color = true;
-          continue;
-        }
-
-        const GeomVertexArrayDataHandle *param_array_reader;
-        Geom::NumericType numeric_type;
-        int num_values, start, stride;
-        if (!gsg->_data_reader->get_array_info(name, param_array_reader,
-                                               num_values, numeric_type,
-                                               start, stride)) {
-          // This is apparently not an error (actually I think it is, just not
-          // a fatal one). The GL implementation fails silently in this case,
-          // but the net result is that we end up not supplying input for a
-          // shader parameter, which can cause Bad Things to happen so I'd
-          // like to at least get a hint as to what's gone wrong.
-          dxgsg9_cat.info() << "Geometry contains no data for shader parameter " << *name << "\n";
-          if (name == InternalName::get_color()) {
-            apply_white_color = true;
-          }
-          continue;
-        }
-
-        // If not associated with the array we're working on, move on.
-        if (param_array_reader != array_reader) {
-          continue;
-        }
-
-        const char *semantic = cgGetParameterSemantic(p);
-        if (semantic == nullptr) {
-          dxgsg9_cat.error() << "Unable to retrieve semantic for parameter " << var_index << "\n";
-          continue;
-        }
-
-        if (strncmp(semantic, "POSITION", strlen("POSITION")) == 0) {
-          if (numeric_type == Geom::NT_float32) {
-            switch (num_values) {
-            case 3:
-              vertex_element_array->add_position_xyz_vertex_element(array_index, start);
-              break;
-            case 4:
-              vertex_element_array->add_position_xyzw_vertex_element(array_index, start);
-              break;
-            default:
-              dxgsg9_cat.error() << "VE ERROR: invalid number of vertex coordinate elements " << num_values << "\n";
-              break;
-            }
-          } else {
-            dxgsg9_cat.error() << "VE ERROR: invalid vertex type " << numeric_type << "\n";
-          }
-        } else if (strncmp(semantic, "TEXCOORD", strlen("TEXCOORD")) == 0) {
-          int slot = atoi(semantic + strlen("TEXCOORD"));
-          if (numeric_type == Geom::NT_float32) {
-            switch (num_values) {
-            case 1:
-              vertex_element_array->add_u_vertex_element(array_index, start, slot);
-              break;
-            case 2:
-              vertex_element_array->add_uv_vertex_element(array_index, start, slot);
-              break;
-            case 3:
-              vertex_element_array->add_uvw_vertex_element(array_index, start, slot);
-              break;
-            case 4:
-              vertex_element_array->add_xyzw_vertex_element(array_index, start, slot);
-              break;
-            default:
-              dxgsg9_cat.error() << "VE ERROR: invalid number of vertex texture coordinate elements " << num_values <<  "\n";
-              break;
-            }
-          } else {
-            dxgsg9_cat.error() << "VE ERROR: invalid texture coordinate type " << numeric_type << "\n";
-          }
-        } else if (strncmp(semantic, "COLOR", strlen("COLOR")) == 0) {
-          if (numeric_type == Geom::NT_packed_dcba ||
-              numeric_type == Geom::NT_packed_dabc ||
-              numeric_type == Geom::NT_uint8) {
-            switch (num_values) {
-            case 4:
-              vertex_element_array->add_diffuse_color_vertex_element(array_index, start);
-              break;
-            default:
-              dxgsg9_cat.error() << "VE ERROR: invalid color coordinates " << num_values << "\n";
-              break;
-            }
-          } else {
-            dxgsg9_cat.error() << "VE ERROR: invalid color type " << numeric_type << "\n";
-          }
-        } else if (strncmp(semantic, "NORMAL", strlen("NORMAL")) == 0) {
-          if (numeric_type == Geom::NT_float32) {
-            switch (num_values) {
-            case 3:
-              vertex_element_array->add_normal_vertex_element(array_index, start);
-              break;
-            default:
-              dxgsg9_cat.error() << "VE ERROR: invalid number of normal coordinate elements " << num_values << "\n";
-              break;
-            }
-          } else {
-            dxgsg9_cat.error() << "VE ERROR: invalid normal type " << numeric_type << "\n";
-          }
-        } else if (strncmp(semantic, "BINORMAL", strlen("BINORMAL")) == 0) {
-          if (numeric_type == Geom::NT_float32) {
-            switch (num_values) {
-            case 3:
-              vertex_element_array->add_binormal_vertex_element(array_index, start);
-              break;
-            default:
-              dxgsg9_cat.error() << "VE ERROR: invalid number of binormal coordinate elements " << num_values << "\n";
-              break;
-            }
-          } else {
-            dxgsg9_cat.error() << "VE ERROR: invalid binormal type " << numeric_type << "\n";
-          }
-        } else if (strncmp(semantic, "TANGENT", strlen("TANGENT")) == 0) {
-          if (numeric_type == Geom::NT_float32) {
-            switch (num_values) {
-            case 3:
-              vertex_element_array->add_tangent_vertex_element(array_index, start);
-              break;
-            default:
-              dxgsg9_cat.error() << "VE ERROR: invalid number of tangent coordinate elements " << num_values << "\n";
-              break;
-            }
-          } else {
-            dxgsg9_cat.error() << "VE ERROR: invalid tangent type " << numeric_type << "\n";
-          }
-        } else {
-          dxgsg9_cat.error() << "Unsupported semantic " << semantic << " for parameter " << var_index << "\n";
-        }
-      }
-
-      // Get the vertex buffer for this array.
-      DXVertexBufferContext9 *dvbc;
-      if (!gsg->setup_array_data(dvbc, array_reader, force)) {
-        dxgsg9_cat.error() << "Unable to setup vertex buffer for array " << array_index << "\n";
-        continue;
-      }
-
-      // Bind this array as the data source for the corresponding stream.
-      const GeomVertexArrayFormat *array_format = array_reader->get_array_format();
-      hr = device->SetStreamSource(array_index, dvbc->_vbuffer, 0, array_format->get_stride());
-      if (FAILED(hr)) {
-        dxgsg9_cat.error() << "SetStreamSource failed" << D3DERRORSTRING(hr);
-      }
-    }
-
-    _num_bound_streams = number_of_arrays;
-
-    if (apply_white_color) {
-      // The shader needs a vertex color, but vertex colors are disabled.
-      // Bind a vertex buffer containing only one white colour.
-      int array_index = number_of_arrays;
-      LPDIRECT3DVERTEXBUFFER9 vbuffer = gsg->get_white_vbuffer();
-      hr = device->SetStreamSource(array_index, vbuffer, 0, 0);
-      if (FAILED(hr)) {
-        dxgsg9_cat.error() << "SetStreamSource failed" << D3DERRORSTRING(hr);
-      }
-      vertex_element_array->add_diffuse_color_vertex_element(array_index, 0);
-      ++_num_bound_streams;
-    }
-
-    if (_vertex_element_array != nullptr &&
-        _vertex_element_array->add_end_vertex_element()) {
-      if (dxgsg9_cat.is_debug()) {
-        // Note that the currently generated vertex declaration works but
-        // never validates.  My theory is that this is due to the shader
-        // programs always using float4 whereas the vertex declaration
-        // correctly sets the number of inputs (float2, float3, etc.).
-        if (cgD3D9ValidateVertexDeclaration(_cg_program,
-                                            _vertex_element_array->_vertex_element_array) == CG_TRUE) {
-          dxgsg9_cat.debug() << "cgD3D9ValidateVertexDeclaration succeeded\n";
-        } else {
-          dxgsg9_cat.debug() << "cgD3D9ValidateVertexDeclaration failed\n";
-        }
-      }
-
-      // Discard the old VertexDeclaration.  This thrashes pretty bad....
-      if (_vertex_declaration != nullptr) {
-        _vertex_declaration->Release();
-        _vertex_declaration = nullptr;
-      }
-
-      hr = device->CreateVertexDeclaration(_vertex_element_array->_vertex_element_array,
-                                           &_vertex_declaration);
-      if (FAILED(hr)) {
-        dxgsg9_cat.error() << "CreateVertexDeclaration failed" << D3DERRORSTRING(hr);
-      } else {
-        hr = device->SetVertexDeclaration(_vertex_declaration);
-        if (FAILED(hr)) {
-          dxgsg9_cat.error() << "SetVertexDeclaration failed" << D3DERRORSTRING(hr);
-        }
-      }
-    } else {
-      dxgsg9_cat.error() << "VertexElementArray creation failed\n";
-    }
-  }
-#endif // HAVE_CG
-
-  return true;
+update_tables(GSG *gsg, const GeomVertexDataPipelineReader *data_reader) {
+  issue_parameters(gsg, Shader::D_vertex_data);
 }
 
 /**
@@ -597,26 +810,17 @@ update_shader_vertex_arrays(DXShaderContext9 *prev, GSG *gsg, bool force) {
  */
 void DXShaderContext9::
 disable_shader_texture_bindings(GSG *gsg) {
-#ifdef HAVE_CG
-  if (_cg_program) {
-    for (size_t i = 0; i < _shader->_tex_spec.size(); ++i) {
-      CGparameter p = _cg_parameter_map[_shader->_tex_spec[i]._id._seqno];
-      if (p == nullptr) {
-        continue;
-      }
-      int texunit = cgGetParameterResourceIndex(p);
-
-      HRESULT hr;
-
-      hr = gsg->_d3d_device->SetTexture(texunit, nullptr);
-      if (FAILED(hr)) {
-        dxgsg9_cat.error()
-          << "SetTexture(" << texunit << ", NULL) failed "
-          << D3DERRORSTRING(hr);
-      }
+  for (const TextureRegister &reg : _textures) {
+    if (reg.unit == (UINT)-1) {
+      continue;
+    }
+    HRESULT hr = gsg->_d3d_device->SetTexture(reg.unit, nullptr);
+    if (FAILED(hr)) {
+      dxgsg9_cat.error()
+        << "SetTexture(" << reg.unit << ", NULL) failed "
+        << D3DERRORSTRING(hr);
     }
   }
-#endif
 }
 
 /**
@@ -631,68 +835,240 @@ update_shader_texture_bindings(DXShaderContext9 *prev, GSG *gsg) {
   if (prev) {
     prev->disable_shader_texture_bindings(gsg);
   }
+  if (!valid(gsg)) {
+    return;
+  }
 
-#ifdef HAVE_CG
-  if (_cg_program) {
-    for (size_t i = 0; i < _shader->_tex_spec.size(); ++i) {
-      Shader::ShaderTexSpec &spec = _shader->_tex_spec[i];
-      CGparameter p = _cg_parameter_map[spec._id._seqno];
-      if (p == nullptr) {
-        continue;
+  ShaderInputBinding::State state;
+  state.gsg = gsg;
+  state.matrix_cache = &gsg->_matrix_cache[0];
+
+  for (const TextureRegister &reg : _textures) {
+    int view = gsg->get_current_tex_view_offset();
+    SamplerState sampler;
+
+    PT(Texture) tex = reg.binding->fetch_texture(state, reg.resource_id, sampler, view);
+    if (tex.is_null()) {
+      continue;
+    }
+
+    DXTextureContext9 *tc = (DXTextureContext9 *)tex->prepare_now(gsg->_prepared_objects, gsg);
+    if (tc == nullptr) {
+      continue;
+    }
+
+    if (reg.unit != (UINT)-1) {
+      gsg->apply_texture(reg.unit, tc, view, sampler);
+    }
+    else if (!gsg->update_texture(tc, false)) {
+      continue;
+    }
+
+    if (reg.size_vreg >= 0 || reg.size_freg >= 0) {
+      DWORD levels = tc->get_d3d_texture(view)->GetLevelCount();
+      const float data[4] = {(float)tc->_width, (float)tc->_height, (float)tc->_depth, (float)levels};
+
+      if (reg.size_vreg >= 0) {
+        gsg->_d3d_device->SetVertexShaderConstantF(reg.size_vreg, data, 1);
       }
-
-      int view = gsg->get_current_tex_view_offset();
-      SamplerState sampler;
-
-      PT(Texture) tex = gsg->fetch_specified_texture(spec, sampler, view);
-      if (tex.is_null()) {
-        continue;
+      if (reg.size_freg >= 0) {
+        gsg->_d3d_device->SetPixelShaderConstantF(reg.size_freg, data, 1);
       }
-
-      if (spec._suffix != nullptr) {
-        // The suffix feature is inefficient.  It is a temporary hack.
-        tex = tex->load_related(spec._suffix);
-      }
-
-      if (tex->get_texture_type() != spec._desired_type) {
-        continue;
-      }
-
-      TextureContext *tc = tex->prepare_now(gsg->_prepared_objects, gsg);
-      if (tc == nullptr) {
-        continue;
-      }
-
-      int texunit = cgGetParameterResourceIndex(p);
-      gsg->apply_texture(texunit, tc, view, sampler);
     }
   }
-#endif
 }
 
-// DEBUG CODE TO TEST ASM CODE GENERATED BY Cg
-void assemble_shader_test(char *file_path) {
-  int flags;
-  D3DXMACRO *defines;
-  LPD3DXINCLUDE include;
-  LPD3DXBUFFER shader;
-  LPD3DXBUFFER error_messages;
+/**
+ * Returns a vertex declaration object suitable for rendering geometry with the
+ * given GeomVertexFormat.
+ */
+LPDIRECT3DVERTEXDECLARATION9 DXShaderContext9::
+get_vertex_declaration(GSG *gsg, const GeomVertexFormat *format, BitMask32 &used_streams) {
+  // Look up the GeomVertexFormat in the cache.
+  auto it = _vertex_declarations.find(format);
+  if (it != _vertex_declarations.end()) {
+    // We've previously rendered geometry with this GeomVertexFormat, so we
+    // already have a vertex declaration.
+    used_streams = it->second.second;
+    return it->second.first;
+  }
 
-  flags = 0;
-  defines = 0;
-  include = 0;
-  shader = 0;
-  error_messages = 0;
+  used_streams = 0;
+  int texcoord_index = 0;
+  size_t const num_arrays = format->get_num_arrays();
+  std::vector<D3DVERTEXELEMENT9> elements;
 
-  D3DXAssembleShaderFromFile(file_path, defines, include, flags, &shader, &error_messages);
-  if (error_messages) {
-    char *error_message;
-
-    error_message = (char *)error_messages->GetBufferPointer();
-    if (error_message) {
-      dxgsg9_cat.error() << error_message;
+  for (const Shader::VertexInputBinding &spec : _shader->_vertex_inputs) {
+    D3DDECLUSAGE usage;
+    if (spec._name == InternalName::get_vertex()) {
+      usage = D3DDECLUSAGE_POSITION;
+    }
+    else if (spec._name == InternalName::get_transform_weight()) {
+      usage = D3DDECLUSAGE_BLENDWEIGHT;
+    }
+    else if (spec._name == InternalName::get_transform_index()) {
+      usage = D3DDECLUSAGE_BLENDINDICES;
+    }
+    else if (spec._name == InternalName::get_normal()) {
+      usage = D3DDECLUSAGE_NORMAL;
+    }
+    else if (spec._name == InternalName::get_tangent()) {
+      usage = D3DDECLUSAGE_TANGENT;
+    }
+    else if (spec._name == InternalName::get_binormal()) {
+      usage = D3DDECLUSAGE_BINORMAL;
+    }
+    else if (spec._name == InternalName::get_color()) {
+      usage = D3DDECLUSAGE_COLOR;
+    }
+    else if (spec._name == InternalName::get_size()) {
+      usage = D3DDECLUSAGE_PSIZE;
+    }
+    else {
+      usage = D3DDECLUSAGE_TEXCOORD;
     }
 
-    error_messages->Release();
+    int array_index;
+    const GeomVertexColumn *column;
+    if (!format->get_array_info(spec._name, array_index, column)) {
+      // Certain missing ones need to be gotten from the "constant vbuffer",
+      // rather than receive the default value of (0, 0, 0, 1).
+      if (spec._name == InternalName::get_color()) {
+        elements.push_back({
+          (WORD)num_arrays,
+          (WORD)0,
+          (BYTE)D3DDECLTYPE_D3DCOLOR,
+          (BYTE)D3DDECLMETHOD_DEFAULT,
+          (BYTE)D3DDECLUSAGE_COLOR,
+          (BYTE)0,
+        });
+        used_streams.set_bit(num_arrays);
+      }
+      else if (spec._name == InternalName::get_transform_index()) {
+        elements.push_back({
+          (WORD)num_arrays,
+          (WORD)4,
+          (BYTE)D3DDECLTYPE_UBYTE4,
+          (BYTE)D3DDECLMETHOD_DEFAULT,
+          (BYTE)D3DDECLUSAGE_BLENDINDICES,
+          (BYTE)0,
+        });
+        used_streams.set_bit(num_arrays);
+      }
+      else if (spec._name == InternalName::get_instance_matrix()) {
+        // Binding the last row isn't necessary; the default is (0, 0, 0, 1)
+        for (size_t ei = 0; ei < 3 && ei < spec._elements; ++ei) {
+          elements.push_back({
+            (WORD)num_arrays,
+            (WORD)(8 + 4 * ei),
+            (BYTE)D3DDECLTYPE_UBYTE4N,
+            (BYTE)D3DDECLMETHOD_DEFAULT,
+            (BYTE)D3DDECLUSAGE_TEXCOORD,
+            (BYTE)(texcoord_index + ei),
+          });
+        }
+        used_streams.set_bit(num_arrays);
+        texcoord_index += spec._elements;
+      }
+      else if (usage == D3DDECLUSAGE_TEXCOORD) {
+        texcoord_index += spec._elements;
+      }
+      continue;
+    }
+    used_streams.set_bit(array_index);
+
+    if (column->get_contents() == GeomEnums::C_clip_point &&
+        column->get_name() == InternalName::get_vertex()) {
+      usage = D3DDECLUSAGE_POSITIONT;
+    }
+    size_t offset = column->get_start();
+    bool normalized = (column->get_contents() == GeomEnums::C_color);
+    int num_components = column->get_num_components();
+
+    D3DDECLTYPE type;
+    switch (column->get_numeric_type()) {
+    case GeomEnums::NT_uint8:
+      type = normalized ? D3DDECLTYPE_UBYTE4N : D3DDECLTYPE_UBYTE4;
+      break;
+    case GeomEnums::NT_uint16:
+      type = (num_components > 2) ? D3DDECLTYPE_USHORT4N : D3DDECLTYPE_USHORT2N;
+      break;
+    case GeomEnums::NT_packed_dcba:
+      type = normalized ? D3DDECLTYPE_UBYTE4N : D3DDECLTYPE_UBYTE4;
+      break;
+    case GeomEnums::NT_packed_dabc:
+      type = normalized ? D3DDECLTYPE_D3DCOLOR : D3DDECLTYPE_UBYTE4;
+      break;
+#ifndef STDFLOAT_DOUBLE
+    case GeomEnums::NT_stdfloat:
+#endif
+    case GeomEnums::NT_float32:
+      type = (D3DDECLTYPE)(D3DDECLTYPE_FLOAT1 + num_components - 1);
+      break;
+    case GeomEnums::NT_int16:
+      type = (num_components > 2)
+        ? (normalized ? D3DDECLTYPE_SHORT4N : D3DDECLTYPE_SHORT4)
+        : (normalized ? D3DDECLTYPE_SHORT2N : D3DDECLTYPE_SHORT2);
+      break;
+    default:
+      dxgsg9_cat.error()
+        << "Unsupported numeric type " << column->get_numeric_type()
+        << " for vertex column " << *spec._name << "\n";
+      continue;
+    }
+
+    for (size_t ei = 0; ei < spec._elements; ++ei) {
+      elements.push_back({
+        (WORD)array_index,
+        (WORD)offset,
+        (BYTE)type,
+        (BYTE)D3DDECLMETHOD_DEFAULT,
+        (BYTE)usage,
+        (BYTE)((usage == D3DDECLUSAGE_TEXCOORD) ? texcoord_index++ : 0),
+      });
+      offset += column->get_element_stride();
+    }
   }
+
+  // Sort the elements, as D3D seems to require them to be in order.
+  struct less_than {
+    bool operator () (const D3DVERTEXELEMENT9 &a, const D3DVERTEXELEMENT9 &b) {
+      if (a.Stream != b.Stream) {
+        return a.Stream < b.Stream;
+      }
+      return a.Offset < b.Offset;
+    }
+  };
+  std::sort(elements.begin(), elements.end(), less_than());
+
+  // CreateVertexDeclaration is fickle so it helps to have some good debugging
+  // info here.
+  if (dxgsg9_cat.is_debug()) {
+    const char *types[] = {"FLOAT1", "FLOAT2", "FLOAT3", "FLOAT4", "D3DCOLOR", "UBYTE4", "SHORT2", "SHORT4", "UBYTE4N", "SHORT2N", "SHORT4N", "USHORT2N", "USHORT4N", "UDEC3", "DEC3N", "FLOAT16_2", "FLOAT16_4", "UNUSED"};
+    const char *usages[] = {"POSITION", "BLENDWEIGHT", "BLENDINDICES", "NORMAL", "PSIZE", "TEXCOORD", "TANGENT", "BINORMAL", "TESSFACTOR", "POSITIONT", "COLOR", "FOG", "DEPTH", "SAMPLE"};
+    dxgsg9_cat.debug()
+      << "Creating vertex declaration for format " << *format << ":\n";
+
+    for (const D3DVERTEXELEMENT9 &element : elements) {
+      dxgsg9_cat.debug()
+        << "  {" << element.Stream << ", " << element.Offset << ", "
+        << "D3DDECLTYPE_" << types[element.Type] << ", "
+        << "D3DDECLMETHOD_DEFAULT, "
+        << "D3DDECLUSAGE_" << usages[element.Usage] << ", "
+        << (int)element.UsageIndex << "}\n";
+    }
+  }
+
+  elements.push_back(D3DDECL_END());
+
+  LPDIRECT3DVERTEXDECLARATION9 decl;
+  HRESULT result = gsg->_d3d_device->CreateVertexDeclaration(elements.data(), &decl);
+  if (FAILED(result)) {
+    dxgsg9_cat.error()
+      << "CreateVertexDeclaration failed" << D3DERRORSTRING(result);
+    return nullptr;
+  }
+
+  _vertex_declarations[format] = std::make_pair(decl, used_streams);
+  return decl;
 }

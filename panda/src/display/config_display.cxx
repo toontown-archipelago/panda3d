@@ -30,6 +30,7 @@
 #include "parasiteBuffer.h"
 #include "pandaSystem.h"
 #include "screenshotRequest.h"
+#include "shaderInputBinding_impls.h"
 #include "stereoDisplayRegion.h"
 #include "subprocessWindow.h"
 #include "windowHandle.h"
@@ -478,11 +479,9 @@ ConfigVariableInt shadow_depth_bits
           "shadow maps.  Set this to 32 for more depth resolution in shadow "
           "maps."));
 ConfigVariableBool shadow_cube_map_filter
-("shadow-cube-map-filter", false,
+("shadow-cube-map-filter", true,
  PRC_DESC("If true, Panda enables hardware depth map comparison mode for "
-          "point lights, if supported.  If false, does not.  Keep this set to "
-          "false if you want the shader generator to work correctly for point "
-          "light shadows."));
+          "point lights, if supported.  This should rarely be changed."));
 
 ConfigVariableColor background_color
 ("background-color", "0.41 0.41 0.41 0.0",
@@ -505,6 +504,15 @@ ConfigVariableDouble display_zoom
           "return whatever was passed in here.  You should generally only "
           "change this based on a user preference change or to test how the UI "
           "will look on monitors with different pixel densities."));
+
+ConfigVariableInt shader_debug_buffer_size
+("shader-debug-buffer-size", 4096,
+ PRC_DESC("Specifies the size in bytes of the buffer used to hold the output "
+          "of shader debug print statements and assertions for a single draw.  "
+          "If a shader produces more debug output than fits in this buffer, the "
+          "excess is dropped and a truncation message is printed; increase this "
+          "value to capture more output.  This is only used in development "
+          "builds."));
 
 /**
  * Initializes the library.  This must be called at least once before any of
@@ -549,4 +557,7 @@ init_libdisplay() {
   PandaSystem *ps = PandaSystem::get_global_ptr();
   ps->add_system("pipelining");
 #endif
+
+  ShaderInputBinding::register_binder(ShaderEnums::SL_GLSL, 0, make_binding_glsl);
+  ShaderInputBinding::register_binder(ShaderEnums::SL_Cg, 0, make_binding_cg);
 }

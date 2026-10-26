@@ -19,6 +19,8 @@
 #include "config_androiddisplay.h"
 #include "frameBufferProperties.h"
 
+extern IMPORT_CLASS struct android_app *panda_android_app;
+
 TypeHandle AndroidGraphicsPipe::_type_handle;
 
 /**
@@ -99,7 +101,7 @@ AndroidGraphicsPipe::get_preferred_window_thread() const {
  * Creates a new window on the pipe, if possible.
  */
 PT(GraphicsOutput) AndroidGraphicsPipe::
-make_output(const std::string &name,
+make_output(std::string_view name,
             const FrameBufferProperties &fb_prop,
             const WindowProperties &win_prop,
             int flags,
@@ -121,6 +123,9 @@ make_output(const std::string &name,
   // First thing to try: an eglGraphicsWindow
 
   if (retry == 0) {
+    if (panda_android_app == nullptr) {
+      return nullptr;
+    }
     if (((flags&BF_require_parasite)!=0)||
         ((flags&BF_refuse_window)!=0)||
         ((flags&BF_resizeable)!=0)||
@@ -130,7 +135,7 @@ make_output(const std::string &name,
         ((flags&BF_can_bind_every)!=0)) {
       return nullptr;
     }
-    return new AndroidGraphicsWindow(engine, this, name, fb_prop, win_prop,
+    return new AndroidGraphicsWindow(engine, this, std::string(name), fb_prop, win_prop,
                                      flags, gsg, host);
   }
 
@@ -189,7 +194,7 @@ make_output(const std::string &name,
       }
     }
 
-    return new eglGraphicsBuffer(engine, this, name, fb_prop, win_prop,
+    return new eglGraphicsBuffer(engine, this, std::string(name), fb_prop, win_prop,
                                  flags, gsg, host);
   }
 

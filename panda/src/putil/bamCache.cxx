@@ -76,11 +76,16 @@ BamCache() :
               "by the GSG.  This may be set in conjunction with "
               "model-cache-textures, or it may be independent."));
 
+  ConfigVariableBool model_cache_shaders
+    ("model-cache-shaders", true,
+     PRC_DESC("If this is set to true, compiled shader modules will be "
+              "cached in the model cache, as smo files."));
+
   ConfigVariableBool model_cache_compiled_shaders
     ("model-cache-compiled-shaders", false,
      PRC_DESC("If this is set to true, compiled shaders will be cached "
               "in the model cache, in their binary form as downloaded "
-              "by the GSG."));
+              "by the GSG.  This currently has no effect."));
 
   ConfigVariableInt model_cache_max_kbytes
     ("model-cache-max-kbytes", 10485760,
@@ -89,6 +94,7 @@ BamCache() :
   _cache_models = model_cache_models;
   _cache_textures = model_cache_textures;
   _cache_compressed_textures = model_cache_compressed_textures;
+  _cache_shaders = model_cache_shaders;
   _cache_compiled_shaders = model_cache_compiled_shaders;
 
   _flush_time = model_cache_flush;
@@ -162,7 +168,7 @@ set_root(const Filename &root) {
  * record to disk.
  */
 PT(BamCacheRecord) BamCache::
-lookup(const Filename &source_filename, const string &cache_extension) {
+lookup(const Filename &source_filename, std::string_view cache_extension) {
   ReMutexHolder holder(_lock);
   consider_flush_index();
 
@@ -183,6 +189,34 @@ lookup(const Filename &source_filename, const string &cache_extension) {
   cache_filename.set_extension(cache_extension);
 
   return find_and_read_record(source_pathname, cache_filename);
+}
+
+/**
+ * Looks up an object in the cache by an arbitrary cache key.
+ *
+ * If the object is cacheable, then regardless of whether the object is found
+ * in the cache or not, this returns a BamCacheRecord.  On the other hand, if
+ * the object cannot be cached, returns NULL.
+ *
+ * If record->has_data() returns true, then the object was found in the cache,
+ * and you may call record->extract_data() to get the object.  If
+ * record->has_data() returns false, then the object was not found in the cache
+ * or the cache was stale; and you should reload the source, and then call
+ * record->set_data() to record the resulting loaded object; and finally, you
+ * should call store() to write the cached record to disk.
+ */
+PT(BamCacheRecord) BamCache::
+lookup_hash(const HashVal &cache_key, std::string_view cache_extension) {
+  ReMutexHolder holder(_lock);
+  consider_flush_index();
+
+  ostringstream strm;
+  cache_key.output_hex(strm);
+
+  Filename cache_filename = strm.str();
+  cache_filename.set_extension(cache_extension);
+
+  return find_and_read_record(Filename("/hash", cache_filename), cache_filename);
 }
 
 /**
@@ -583,8 +617,8 @@ rebuild_index() {
   for (int ci = 0; ci < num_files; ++ci) {
     VirtualFile *file = contents->get_file(ci);
     Filename filename = file->get_filename();
-    if (filename.get_extension() == "bam" ||
-        filename.get_extension() == "txo") {
+    std::string ext = filename.get_extension();
+    if (ext == "bam" || ext == "txo" || ext == "sho" || ext == "smo") {
       Filename pathname(_root, filename);
 
       PT(BamCacheRecord) record = do_read_record(pathname, false);
@@ -960,11 +994,94 @@ do_read_record(const Filename &cache_pathname, bool read_data) {
 }
 
 /**
+ * Clear the model cache.
+ *
+ * Acquires the internal _lock for thread-safety (so callers do NOT need to
+ * hold the lock). If no cache root is configured (_root.empty()), returns
+ * immediately. If the cache is marked _read_only, resets only the in-memory
+ * index and emits a warning message.
+ * If the VirtualFileSystem global pointer is not available, logs an error,
+ * resets only the in-memory index, and returns immediately. Otherwise, scans
+ * the cache root directory and deletes cache files matching the known cache
+ * extensions (.bam, .txo, .sho). Removes the on-disk index file (if known)
+ * or the index reference file and clears the in-memory index reference
+ * contents. Resets the in-memory index to an empty BamCacheIndex. Marks the
+ * index stale and attempts to flush a new, empty on-disk index so other
+ * processes will observe the cleared state.
+ */
+void BamCache::
+clear() {
+  ReMutexHolder holder(_lock);
+
+  VirtualFileSystem *vfs = VirtualFileSystem::get_global_ptr();
+
+  if (_root.empty()) {
+    return;
+  }
+
+  // If the cache is read-only, only reset the in-memory index and log.
+  if (_read_only) {
+    util_cat.info() << "BamCache::clear(): cache is read-only; clearing in-memory index only.\n";
+    reset_in_memory_index();
+    return;
+  }
+
+  if (vfs == nullptr) {
+    util_cat.error() << "BamCache::clear(): VFS is not available\n";
+    reset_in_memory_index();
+    return;
+  }
+
+  // Delete cache files (.bam, .txo, .sho) in the cache root directory.
+  PT(VirtualFileList) contents = vfs->scan_directory(_root);
+  if (contents != nullptr) {
+    int num_files = contents->get_num_files();
+    for (int ci = 0; ci < num_files; ++ci) {
+      VirtualFile *file = contents->get_file(ci);
+      Filename filename = file->get_filename();
+      const std::string ext = filename.get_extension();
+
+      if (ext == "bam" || ext == "txo" || ext == "sho" || ext == "smo") {
+        Filename pathname(_root, filename);
+        if (!vfs->delete_file(pathname)) {
+          util_cat.debug()
+            << "Could not delete cache file " << pathname << "\n";
+        }
+      }
+    }
+  }
+
+  // Remove index files: the index file itself (if known) and the index ref.
+  Filename index_ref_pathname(_root, Filename("index_name.txt"));
+  if (!_index_pathname.empty()) {
+    vfs->delete_file(_index_pathname);
+    _index_pathname = Filename();
+    _index_ref_contents.clear();
+  } else {
+    vfs->delete_file(index_ref_pathname);
+  }
+
+  reset_in_memory_index();
+
+  // Try to write an empty index back to disk: mark stale then flush.
+  mark_index_stale();
+  flush_index();
+}
+
+/* Reset the in-memory cache index to an empty state (caller must hold _lock). */
+void BamCache::
+reset_in_memory_index() {
+  delete _index;
+  _index = new BamCacheIndex;
+  _index_stale_since = 0;
+}
+
+/**
  * Returns the appropriate filename to use for a cache file, given the
  * fullpath string to the source filename.
  */
 string BamCache::
-hash_filename(const string &filename) {
+hash_filename(std::string_view filename) {
   // Use the MD5 hash of the filename.
   HashVal hv;
   hv.hash_string(filename);

@@ -63,6 +63,13 @@
   #include <sys/time.h>
 #endif
 
+#ifdef __APPLE__
+extern "C" {
+  void *objc_autoreleasePoolPush();
+  void objc_autoreleasePoolPop(void *);
+};
+#endif
+
 using std::string;
 
 PT(GraphicsEngine) GraphicsEngine::_global_ptr;
@@ -145,8 +152,9 @@ INLINE static bool operator < (const CullKey &a, const CullKey &b) {
  * any Pipeline you choose.
  */
 GraphicsEngine::
-GraphicsEngine(Pipeline *pipeline) :
+GraphicsEngine(ClockObject *clock, Pipeline *pipeline) :
   _pipeline(pipeline),
+  _clock(clock),
   _app("app"),
   _lock("GraphicsEngine::_lock"),
   _loaded_textures_lock("GraphicsEngine::_loaded_textures_lock")
@@ -159,6 +167,7 @@ GraphicsEngine(Pipeline *pipeline) :
   _window_sort_index = 0;
 
   set_threading_model(GraphicsThreadingModel(threading_model));
+  _threading_model_changed = false;
   if (!_threading_model.is_default()) {
     display_cat.info()
       << "Using threading model " << _threading_model << "\n";
@@ -187,9 +196,9 @@ GraphicsEngine::
 }
 
 /**
- * Specifies how future objects created via make_gsg(), make_buffer(), and
- * make_output() will be threaded.  This does not affect any already-created
- * objects.
+ * Specifies how objects created via make_gsg(), make_buffer(), and
+ * make_output() will be threaded.  Already-created windows will be
+ * reassigned to the new threading model at the next call to render_frame().
  */
 void GraphicsEngine::
 set_threading_model(const GraphicsThreadingModel &threading_model) {
@@ -217,7 +226,10 @@ set_threading_model(const GraphicsThreadingModel &threading_model) {
   }
 #endif  // THREADED_PIPELINE
   ReMutexHolder holder(_lock);
-  _threading_model = threading_model;
+  if (_threading_model.get_model() != threading_model.get_model()) {
+    _threading_model = threading_model;
+    _threading_model_changed = true;
+  }
 }
 
 /**
@@ -252,7 +264,7 @@ get_threading_model() const {
 
 GraphicsOutput *GraphicsEngine::
 make_output(GraphicsPipe *pipe,
-            const string &name, int sort,
+            std::string_view name, int sort,
             const FrameBufferProperties &fb_prop,
             const WindowProperties &win_prop,
             int flags,
@@ -332,7 +344,7 @@ make_output(GraphicsPipe *pipe,
   nassertr(pipe != nullptr, nullptr);
   if (gsg != nullptr) {
     nassertr(pipe == gsg->get_pipe(), nullptr);
-    nassertr(this == gsg->get_engine(), nullptr);
+    //nassertr(this == gsg->get_engine(), nullptr);
   }
 
   // Are we really asking for a callback window?
@@ -344,7 +356,7 @@ make_output(GraphicsPipe *pipe,
       this_gsg = pipe->make_callback_gsg(this);
     }
     if (this_gsg != nullptr) {
-      CallbackGraphicsWindow *window = new CallbackGraphicsWindow(this, pipe, name, fb_prop, win_prop, flags, this_gsg);
+      CallbackGraphicsWindow *window = new CallbackGraphicsWindow(this, pipe, std::string(name), fb_prop, win_prop, flags, this_gsg);
       window->_sort = sort;
       do_add_window(window);
       do_add_gsg(window->get_gsg(), pipe);
@@ -384,7 +396,7 @@ make_output(GraphicsPipe *pipe,
       (x_size <= host->get_x_size())&&
       (y_size <= host->get_y_size())&&
       (host->get_fb_properties().subsumes(fb_prop))) {
-    ParasiteBuffer *buffer = new ParasiteBuffer(host, name, x_size, y_size, flags);
+    ParasiteBuffer *buffer = new ParasiteBuffer(host, std::string(name), x_size, y_size, flags);
     buffer->_sort = sort;
     do_add_window(buffer);
     do_add_gsg(host->get_gsg(), pipe);
@@ -396,7 +408,7 @@ make_output(GraphicsPipe *pipe,
   // less than ideal.  You might set this if you really don't trust your
   // graphics driver's support for offscreen buffers.
   if (force_parasite_buffer && can_use_parasite) {
-    ParasiteBuffer *buffer = new ParasiteBuffer(host, name, x_size, y_size, flags);
+    ParasiteBuffer *buffer = new ParasiteBuffer(host, std::string(name), x_size, y_size, flags);
     buffer->_sort = sort;
     do_add_window(buffer);
     do_add_gsg(host->get_gsg(), pipe);
@@ -457,7 +469,7 @@ make_output(GraphicsPipe *pipe,
   // window to the user's specs.  Try a parasite as a last hope.
 
   if (can_use_parasite) {
-    ParasiteBuffer *buffer = new ParasiteBuffer(host, name, x_size, y_size, flags);
+    ParasiteBuffer *buffer = new ParasiteBuffer(host, std::string(name), x_size, y_size, flags);
     buffer->_sort = sort;
     do_add_window(buffer);
     do_add_gsg(host->get_gsg(), pipe);
@@ -722,15 +734,17 @@ render_frame() {
   // been rendered).
   open_windows();
 
-  ClockObject *global_clock = ClockObject::get_global_clock();
-
   if (display_cat.is_spam()) {
     display_cat.spam()
-      << "render_frame() - frame " << global_clock->get_frame_count() << "\n";
+      << "render_frame() - frame " << _clock->get_frame_count() << "\n";
   }
 
   {
     ReMutexHolder holder(_lock, current_thread);
+
+    if (_threading_model_changed) {
+      do_reassign_windows(current_thread);
+    }
 
     if (!_windows_sorted) {
       do_resort_windows();
@@ -839,8 +853,8 @@ render_frame() {
     }
 #endif  // THREADED_PIPELINE
 
-    global_clock->tick(current_thread);
-    if (global_clock->check_errors(current_thread)) {
+    _clock->tick(current_thread);
+    if (_clock->check_errors(current_thread)) {
       throw_event("clock_error");
     }
 
@@ -1128,47 +1142,53 @@ flip_frame() {
  */
 bool GraphicsEngine::
 extract_texture_data(Texture *tex, GraphicsStateGuardian *gsg) {
-  ReMutexHolder holder(_lock);
-
-  string draw_name = gsg->get_threading_model().get_draw_name();
-  if (draw_name.empty()) {
-    // A single-threaded environment.  No problem.
+  return run_on_draw_thread([=] () {
     return gsg->extract_texture_data(tex);
+  });
+}
 
-  } else {
-    // A multi-threaded environment.  We have to wait until the draw thread
-    // has finished its current task.
-    WindowRenderer *wr = get_window_renderer(draw_name, 0);
-    RenderThread *thread = (RenderThread *)wr;
-    MutexHolder cv_holder(thread->_cv_mutex);
-
-    while (thread->_thread_state != TS_wait) {
-      thread->_cv_done.wait();
+/**
+ * Asks the indicated GraphicsStateGuardian to retrieve the buffer memory
+ * image of the indicated ShaderBuffer and return it.
+ *
+ * This is mainly useful for debugging.  It is a very slow call because it
+ * introduces a pipeline stall both of Panda's pipeline and the graphics
+ * pipeline.  This is even when only a small amount of data is downloaded.
+ *
+ * The return value is empty if some kind of error occurred.
+ */
+vector_uchar GraphicsEngine::
+extract_shader_buffer_data(ShaderBuffer *buffer, GraphicsStateGuardian *gsg,
+                           size_t start, size_t size) {
+  return run_on_draw_thread([=] () {
+    vector_uchar data;
+    if (!gsg->extract_shader_buffer_data(buffer, data, start, size)) {
+      data.clear();
     }
+    return data;
+  });
+}
 
-    // Temporarily set this so that it accesses data from the current thread.
-    int pipeline_stage = Thread::get_current_pipeline_stage();
-    int draw_pipeline_stage = thread->get_pipeline_stage();
-    thread->set_pipeline_stage(pipeline_stage);
-
-    // Now that the draw thread is idle, signal it to do the extraction task.
-    thread->_gsg = gsg;
-    thread->_texture = tex;
-    thread->_thread_state = TS_do_extract;
-    thread->_cv_mutex.release();
-    thread->_cv_start.notify();
-    thread->_cv_mutex.acquire();
-
-    // Wait for it to finish the extraction.
-    while (thread->_thread_state != TS_wait) {
-      thread->_cv_done.wait();
-    }
-
-    thread->set_pipeline_stage(draw_pipeline_stage);
-    thread->_gsg = nullptr;
-    thread->_texture = nullptr;
-    return thread->_result;
+/**
+ * Updates shader buffer data from the CPU.  This may be a subsection of the
+ * buffer.  Returns true on success.
+ *
+ * Updating is only allowed for buffers with usage hint set to UH_dynamic.
+ */
+bool GraphicsEngine::
+update_shader_buffer_data(ShaderBuffer *buffer, GraphicsStateGuardian *gsg,
+                          const vector_uchar &data, size_t offset) {
+  if (buffer->get_usage_hint() != GeomEnums::UH_dynamic) {
+    display_cat.error()
+      << "Cannot update ShaderBuffer with usage hint " << buffer->get_usage_hint() << "\n";
+    return false;
   }
+
+  const unsigned char *data_ptr = data.data();
+  const size_t data_size = data.size();
+  return run_on_draw_thread([=] () {
+    return gsg->update_shader_buffer_data(buffer, offset, data_size, data_ptr);
+  });
 }
 
 /**
@@ -1185,57 +1205,21 @@ extract_texture_data(Texture *tex, GraphicsStateGuardian *gsg) {
  * The return value is true if the operation is successful, false otherwise.
  */
 void GraphicsEngine::
-dispatch_compute(const LVecBase3i &work_groups, const ShaderAttrib *sattr, GraphicsStateGuardian *gsg) {
+dispatch_compute(const LVecBase3i &work_groups, const RenderState *state, GraphicsStateGuardian *gsg) {
+  const ShaderAttrib *sattr;
+  DCAST_INTO_V(sattr, state->get_attrib(ShaderAttrib::get_class_slot()));
+
   const Shader *shader = sattr->get_shader();
   nassertv(shader != nullptr);
   nassertv(gsg != nullptr);
 
-  ReMutexHolder holder(_lock);
-
-  CPT(RenderState) state = RenderState::make(sattr);
-
-  string draw_name = gsg->get_threading_model().get_draw_name();
-  if (draw_name.empty()) {
-    // A single-threaded environment.  No problem.
+  run_on_draw_thread([=] () {
+    gsg->make_current();
     gsg->push_group_marker(std::string("Compute ") + shader->get_filename(Shader::ST_compute).get_basename());
     gsg->set_state_and_transform(state, TransformState::make_identity());
     gsg->dispatch_compute(work_groups[0], work_groups[1], work_groups[2]);
     gsg->pop_group_marker();
-
-  } else {
-    // A multi-threaded environment.  We have to wait until the draw thread
-    // has finished its current task.
-    WindowRenderer *wr = get_window_renderer(draw_name, 0);
-    RenderThread *thread = (RenderThread *)wr;
-    MutexHolder cv_holder(thread->_cv_mutex);
-
-    while (thread->_thread_state != TS_wait) {
-      thread->_cv_done.wait();
-    }
-
-    // Temporarily set this so that it accesses data from the current thread.
-    int pipeline_stage = Thread::get_current_pipeline_stage();
-    int draw_pipeline_stage = thread->get_pipeline_stage();
-    thread->set_pipeline_stage(pipeline_stage);
-
-    // Now that the draw thread is idle, signal it to do the compute task.
-    thread->_gsg = gsg;
-    thread->_state = state.p();
-    thread->_work_groups = work_groups;
-    thread->_thread_state = TS_do_compute;
-    thread->_cv_mutex.release();
-    thread->_cv_start.notify();
-    thread->_cv_mutex.acquire();
-
-    // Wait for it to finish the compute task.
-    while (thread->_thread_state != TS_wait) {
-      thread->_cv_done.wait();
-    }
-
-    thread->set_pipeline_stage(draw_pipeline_stage);
-    thread->_gsg = nullptr;
-    thread->_state = nullptr;
-  }
+  });
 }
 
 /**
@@ -1269,43 +1253,6 @@ texture_uploaded(Texture *tex) {
   lt._tex = tex;
   lt._image_modified = tex->get_image_modified();
 // Usually only called by DisplayRegion::do_cull.
-}
-
-/**
- * Called by DisplayRegion::do_get_screenshot
- */
-PT(Texture) GraphicsEngine::
-do_get_screenshot(DisplayRegion *region, GraphicsStateGuardian *gsg) {
-  // A multi-threaded environment.  We have to wait until the draw thread
-  // has finished its current task.
-
-  ReMutexHolder holder(_lock);
-
-  const std::string &draw_name = gsg->get_threading_model().get_draw_name();
-  WindowRenderer *wr = get_window_renderer(draw_name, 0);
-  RenderThread *thread = (RenderThread *)wr;
-  MutexHolder cv_holder(thread->_cv_mutex);
-
-  while (thread->_thread_state != TS_wait) {
-    thread->_cv_done.wait();
-  }
-
-  // Now that the draw thread is idle, signal it to do the extraction task.
-  thread->_region = region;
-  thread->_thread_state = TS_do_screenshot;
-  thread->_cv_mutex.release();
-  thread->_cv_start.notify();
-  thread->_cv_mutex.acquire();
-
-  // Wait for it to finish the extraction.
-  while (thread->_thread_state != TS_wait) {
-    thread->_cv_done.wait();
-  }
-
-  PT(Texture) tex = std::move(thread->_texture);
-  thread->_region = nullptr;
-  thread->_texture = nullptr;
-  return tex;
 }
 
 /**
@@ -2247,6 +2194,154 @@ do_remove_window(GraphicsOutput *window, Thread *current_thread) {
 }
 
 /**
+ * Reassigns all existing windows to the window renderers indicated by the
+ * current threading model.  This is called from render_frame() when the
+ * threading model has been changed via set_threading_model().
+ *
+ * You must already be holding _lock before calling this method.
+ */
+void GraphicsEngine::
+do_reassign_windows(Thread *current_thread) {
+  nassertv(_lock.debug_is_locked());
+  _threading_model_changed = false;
+
+  if (_windows.empty()) {
+    // No existing windows to reassign, but we may still need to clean up
+    // threads that are no longer needed.
+    if (!_threads.empty()) {
+      terminate_threads(current_thread);
+    }
+    return;
+  }
+
+  display_cat.info()
+    << "Reassigning windows to threading model " << _threading_model << "\n";
+
+  // Ensure all threads are done with their current frame.  We need the
+  // previous frame to be fully complete (including flip) before we can
+  // reassign.
+  if (_flip_state == FS_draw) {
+    do_sync_frame(current_thread);
+  }
+  if (_flip_state == FS_sync) {
+    do_flip_frame(current_thread);
+  }
+
+  // Wait for all threads to reach TS_wait and acquire their mutexes.
+  {
+    PStatTimer timer(_wait_pcollector, current_thread);
+    Threads::const_iterator ti;
+    for (ti = _threads.begin(); ti != _threads.end(); ++ti) {
+      RenderThread *thread = (*ti).second;
+      thread->_cv_mutex.acquire();
+      while (thread->_thread_state != TS_wait) {
+        thread->_cv_done.wait();
+      }
+    }
+  }
+
+  // Have each thread release its GL context before we reassign.  This
+  // prevents BadAccess errors on X11 (and similar issues on other platforms)
+  // when the new draw thread tries to make the context current while the old
+  // thread still has it bound.
+  for (auto &pair : _threads) {
+    RenderThread *thread = pair.second;
+    if (!thread->_gsgs.empty()) {
+      // Get a pipe from any GSG on this thread to call release on.
+      GraphicsPipe *pipe = (*thread->_gsgs.begin())->get_pipe();
+
+      thread->_thread_state = TS_callback;
+      thread->_callback = [] (RenderThread *rt) {
+        ((GraphicsPipe *)rt->_callback_data)->release_current_context();
+      };
+      thread->_callback_data = pipe;
+      thread->_cv_mutex.release();
+      thread->_cv_start.notify();
+
+      thread->_cv_mutex.acquire();
+      while (thread->_thread_state != TS_wait) {
+        thread->_cv_done.wait();
+      }
+    }
+  }
+
+  // Also release on the app thread for GSGs that were drawn in app.
+  for (auto &gsg : _app._gsgs) {
+    gsg->get_pipe()->release_current_context();
+  }
+
+  // Clear all window and GSG assignments from all WindowRenderers.  Don't
+  // touch _pending_close, as those are windows that were already scheduled
+  // for closure and should still be closed by their original thread.
+  _app._cull.clear();
+  _app._cdraw.clear();
+  _app._draw.clear();
+  _app._window.clear();
+  _app._gsgs.clear();
+
+  for (auto &pair : _threads) {
+    RenderThread *thread = pair.second;
+    thread->_cull.clear();
+    thread->_cdraw.clear();
+    thread->_draw.clear();
+    thread->_window.clear();
+    thread->_gsgs.clear();
+  }
+
+  // Terminate all existing threads.  Since we cleared their window lists,
+  // do_close() (called during TS_terminate) will be a no-op.
+  {
+    Threads::const_iterator ti;
+    for (ti = _threads.begin(); ti != _threads.end(); ++ti) {
+      RenderThread *thread = (*ti).second;
+      thread->_thread_state = TS_terminate;
+      thread->_cv_mutex.release();
+      thread->_cv_start.notify();
+    }
+    for (ti = _threads.begin(); ti != _threads.end(); ++ti) {
+      RenderThread *thread = (*ti).second;
+      thread->join();
+    }
+  }
+  _threads.clear();
+
+  // Now re-assign all windows based on the new threading model.
+  // get_window_renderer() will create new threads as needed.
+  WindowRenderer *cull =
+    get_window_renderer(_threading_model.get_cull_name(),
+                        _threading_model.get_cull_stage());
+  WindowRenderer *draw =
+    get_window_renderer(_threading_model.get_draw_name(),
+                        _threading_model.get_draw_stage());
+
+  for (GraphicsOutput *window : _windows) {
+    if (_threading_model.get_cull_sorting()) {
+      cull->add_window(cull->_cull, window);
+      draw->add_window(draw->_draw, window);
+    } else {
+      cull->add_window(cull->_cdraw, window);
+    }
+
+    switch (window->get_pipe()->get_preferred_window_thread()) {
+    case GraphicsPipe::PWT_app:
+      _app.add_window(_app._window, window);
+      break;
+
+    case GraphicsPipe::PWT_draw:
+      draw->add_window(draw->_window, window);
+      break;
+    }
+
+    // Re-assign the GSG to the new draw thread.
+    GraphicsStateGuardian *gsg = window->get_gsg();
+    if (gsg != nullptr) {
+      gsg->_threading_model = _threading_model;
+      draw->add_gsg(gsg);
+    }
+  }
+}
+
+/**
  * Resorts all of the Windows lists.  This may need to be done if one or more
  * of the windows' sort properties has changed.
  */
@@ -2453,7 +2548,7 @@ get_invert_polygon_state() {
  * You must already be holding the lock before calling this method.
  */
 GraphicsEngine::WindowRenderer *GraphicsEngine::
-get_window_renderer(const string &name, int pipeline_stage) {
+get_window_renderer(std::string_view name, int pipeline_stage) {
   nassertr(_lock.debug_is_locked(), nullptr);
 
   if (name.empty()) {
@@ -2471,7 +2566,7 @@ get_window_renderer(const string &name, int pipeline_stage) {
 
   bool started = thread->start(TP_normal, true);
   nassertr(started, thread.p());
-  _threads[name] = thread;
+  _threads[std::string(name)] = thread;
 
   nassertr(thread->get_pipeline_stage() < _pipeline->get_num_stages(), thread.p());
 
@@ -2482,8 +2577,8 @@ get_window_renderer(const string &name, int pipeline_stage) {
  *
  */
 GraphicsEngine::WindowRenderer::
-WindowRenderer(const string &name) :
-  _wl_lock(string("GraphicsEngine::WindowRenderer::_wl_lock ") + name)
+WindowRenderer(std::string_view name) :
+  _wl_lock(std::string("GraphicsEngine::WindowRenderer::_wl_lock ").append(name))
 {
 }
 
@@ -2585,6 +2680,11 @@ void GraphicsEngine::WindowRenderer::
 do_frame(GraphicsEngine *engine, Thread *current_thread) {
   LightReMutexHolder holder(_wl_lock);
 
+#ifdef __APPLE__
+  // Enclose the entire frame in an autorelease pool.
+  void *pool = objc_autoreleasePoolPush();
+#endif
+
   if (!_cull.empty()) {
     engine->cull_to_bins(_cull, current_thread);
   }
@@ -2597,6 +2697,10 @@ do_frame(GraphicsEngine *engine, Thread *current_thread) {
   if (!_window.empty()) {
     engine->process_events(_window, current_thread);
   }
+
+#ifdef __APPLE__
+  objc_autoreleasePoolPop(pool);
+#endif
 
   // If any GSG's on the list have no more outstanding pointers, clean them
   // up.  (We are in the draw thread for all of these GSG's.)
@@ -2629,10 +2733,18 @@ void GraphicsEngine::WindowRenderer::
 do_windows(GraphicsEngine *engine, Thread *current_thread) {
   LightReMutexHolder holder(_wl_lock);
 
+#ifdef __APPLE__
+  void *pool = objc_autoreleasePoolPush();
+#endif
+
   engine->process_events(_window, current_thread);
 
   engine->make_contexts(_cdraw, current_thread);
   engine->make_contexts(_draw, current_thread);
+
+#ifdef __APPLE__
+  objc_autoreleasePoolPop(pool);
+#endif
 }
 
 /**
@@ -2734,11 +2846,11 @@ any_done_gsgs() const {
  *
  */
 GraphicsEngine::RenderThread::
-RenderThread(const string &name, GraphicsEngine *engine) :
-  Thread(name, "Main"),
+RenderThread(std::string_view name, GraphicsEngine *engine) :
+  Thread(std::string(name), "Main"),
   WindowRenderer(name),
   _engine(engine),
-  _cv_mutex(string("GraphicsEngine::RenderThread ") + name),
+  _cv_mutex(std::string("GraphicsEngine::RenderThread ").append(name)),
   _cv_start(_cv_mutex),
   _cv_done(_cv_mutex)
 {
@@ -2779,26 +2891,9 @@ thread_main() {
       do_pending(_engine, current_thread);
       break;
 
-    case TS_do_compute:
-      nassertd(_gsg != nullptr && _state != nullptr) break;
-      {
-        const ShaderAttrib *sattr;
-        _state->get_attrib(sattr);
-        _gsg->push_group_marker(std::string("Compute ") + sattr->get_shader()->get_filename(Shader::ST_compute).get_basename());
-        _gsg->set_state_and_transform(_state, TransformState::make_identity());
-        _gsg->dispatch_compute(_work_groups[0], _work_groups[1], _work_groups[2]);
-        _gsg->pop_group_marker();
-      }
-      break;
-
-    case TS_do_extract:
-      nassertd(_gsg != nullptr && _texture != nullptr) break;
-      _result = _gsg->extract_texture_data(_texture);
-      break;
-
-    case TS_do_screenshot:
-      nassertd(_region != nullptr) break;
-      _texture = _region->get_screenshot();
+    case TS_callback:
+      nassertd(_callback != nullptr) break;
+      _callback(this);
       break;
 
     case TS_terminate:
@@ -2822,4 +2917,40 @@ thread_main() {
       _cv_start.wait();
     }
   }
+}
+
+/**
+ * Waits for this thread to become idle, then runs the given function on it.
+ */
+void GraphicsEngine::RenderThread::
+run_on_thread(Callback *callback, void *callback_data, void *return_data) {
+  MutexHolder cv_holder(_cv_mutex);
+
+  while (_thread_state != TS_wait) {
+    _cv_done.wait();
+  }
+
+  // Temporarily set this so that it accesses data from the current thread.
+  int pipeline_stage = Thread::get_current_pipeline_stage();
+  int thread_pipeline_stage = get_pipeline_stage();
+  set_pipeline_stage(pipeline_stage);
+
+  // Now that the draw thread is idle, signal it to run the callback.
+  _callback = callback;
+  _callback_data = callback_data;
+  _return_data = return_data;
+  _thread_state = TS_callback;
+  _cv_mutex.release();
+  _cv_start.notify();
+  _cv_mutex.acquire();
+
+  // Wait for it to finish the job.
+  while (_thread_state != TS_wait) {
+    _cv_done.wait();
+  }
+
+  set_pipeline_stage(thread_pipeline_stage);
+  _callback = nullptr;
+  _callback_data = nullptr;
+  _return_data = nullptr;
 }

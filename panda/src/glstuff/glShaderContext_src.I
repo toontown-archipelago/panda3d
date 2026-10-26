@@ -10,3 +10,14 @@
  * @author jyelon
  * @date 2005-09-01
  */
+
+/**
+ *
+ */
+INLINE void CLP(ShaderContext)::
+set_display_region(const DisplayRegion *display_region) {
+  if (_display_region != display_region) {
+    _display_region = display_region;
+    _force_respecify |= Shader::D_scene;
+  }
+}

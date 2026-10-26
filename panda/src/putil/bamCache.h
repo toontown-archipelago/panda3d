@@ -26,6 +26,7 @@
 #include <time.h>
 
 class BamCacheIndex;
+class HashVal;
 
 /**
  * This class maintains a cache of Bam and/or Txo objects generated from model
@@ -56,6 +57,9 @@ PUBLISHED:
   INLINE void set_cache_compressed_textures(bool flag);
   INLINE bool get_cache_compressed_textures() const;
 
+  INLINE void set_cache_shaders(bool flag);
+  INLINE bool get_cache_shaders() const;
+
   INLINE void set_cache_compiled_shaders(bool flag);
   INLINE bool get_cache_compiled_shaders() const;
 
@@ -72,13 +76,17 @@ PUBLISHED:
   INLINE bool get_read_only() const;
 
   PT(BamCacheRecord) lookup(const Filename &source_filename,
-                            const std::string &cache_extension);
+                            std::string_view cache_extension);
+  PT(BamCacheRecord) lookup_hash(const HashVal &cache_key,
+                                 std::string_view cache_extension);
   bool store(BamCacheRecord *record);
 
   void consider_flush_index();
   void flush_index();
 
   void list_index(std::ostream &out, int indent_level = 0) const;
+
+  void clear();
 
   INLINE static BamCache *get_global_ptr();
   INLINE static void consider_flush_global_index();
@@ -90,6 +98,7 @@ PUBLISHED:
   MAKE_PROPERTY(cache_textures, get_cache_textures, set_cache_textures);
   MAKE_PROPERTY(cache_compressed_textures, get_cache_compressed_textures,
                                            set_cache_compressed_textures);
+  MAKE_PROPERTY(cache_shaders, get_cache_shaders, set_cache_shaders);
   MAKE_PROPERTY(cache_compiled_shaders, get_cache_compiled_shaders,
                                         set_cache_compiled_shaders);
   MAKE_PROPERTY(root, get_root, set_root);
@@ -104,7 +113,7 @@ private:
   void merge_index(BamCacheIndex *new_index);
   void rebuild_index();
   INLINE void mark_index_stale();
-
+  void reset_in_memory_index(); 
   void add_to_index(const BamCacheRecord *record);
   void remove_from_index(const Filename &source_filename);
 
@@ -123,13 +132,14 @@ private:
   static PT(BamCacheRecord) do_read_record(const Filename &cache_pathname,
                                            bool read_data);
 
-  static std::string hash_filename(const std::string &filename);
+  static std::string hash_filename(std::string_view filename);
   static void make_global();
 
   bool _active;
   bool _cache_models;
   bool _cache_textures;
   bool _cache_compressed_textures;
+  bool _cache_shaders;
   bool _cache_compiled_shaders;
   bool _read_only;
   Filename _root;

@@ -1,0 +1,196 @@
+/**
+ * PANDA 3D SOFTWARE
+ * Copyright (c) Carnegie Mellon University.  All rights reserved.
+ *
+ * All use of this software is subject to the terms of the revised BSD
+ * license.  You should have received a copy of this license along
+ * with this source code in a file named "LICENSE."
+ *
+ * @file shaderModule.h
+ * @author Mitchell Stokes
+ * @date 2019-02-16
+ */
+
+#ifndef SHADERMODULE_H
+#define SHADERMODULE_H
+
+#include "copyOnWriteObject.h"
+#include "internalName.h"
+#include "shaderEnums.h"
+#include "shaderType.h"
+#include "vector_uchar.h"
+
+class BamCacheRecord;
+class VirtualFile;
+
+/**
+ * Represents a single shader module in some intermediate representation for
+ * passing to the driver.  This could contain compiled bytecode, or in some
+ * cases, preprocessed source code to be given directly to the driver.
+ *
+ * This class inherits from CopyOnWriteObject so that modules can safely be
+ * shared between multiple Shader objects, with a unique copy automatically
+ * being created if the Shader needs to manipulate the module.
+ */
+class EXPCL_PANDA_GOBJ ShaderModule : public CopyOnWriteObject, public ShaderEnums {
+PUBLISHED:
+  /**
+   * Defines an interface variable.
+   */
+  struct Variable {
+  public:
+    int has_location() const { return _location >= 0; }
+    int get_location() const { return _location; }
+
+  PUBLISHED:
+    const ShaderType *type;
+    CPT(InternalName) name;
+    uint32_t id;
+
+    MAKE_PROPERTY2(location, has_location, get_location);
+
+  public:
+    int _location;
+  };
+
+  /**
+   * Defines a specialization constant.
+   */
+  struct SpecializationConstant {
+  PUBLISHED:
+    const ShaderType *type;
+    CPT(InternalName) name;
+    uint32_t id;
+  };
+
+public:
+  ShaderModule(Stage stage);
+  virtual ~ShaderModule();
+
+  void add_dependent_file(const VirtualFile *file);
+  bool check_dependents_modified() const;
+  void record_dependent_files(BamCacheRecord *record) const;
+
+  INLINE Stage get_stage() const;
+  INLINE uint64_t get_used_capabilities() const;
+
+  INLINE const Filename &get_source_filename() const;
+  INLINE void set_source_filename(const Filename &);
+
+  INLINE const std::string &get_source_entry_point() const;
+  INLINE void set_source_entry_point(std::string entry_point);
+
+#ifdef CPPPARSER
+  INLINE SpecializationConstant get_spec_constant(size_t i) const;
+#else
+  INLINE const SpecializationConstant &get_spec_constant(size_t i) const;
+#endif
+  INLINE size_t get_num_spec_constants() const;
+
+  INLINE size_t get_num_inputs() const;
+#ifdef CPPPARSER
+  INLINE Variable get_input(size_t i) const;
+#else
+  INLINE const Variable &get_input(size_t i) const;
+#endif
+  INLINE int find_input(CPT_InternalName name) const;
+
+  INLINE size_t get_num_outputs() const;
+#ifdef CPPPARSER
+  INLINE Variable get_output(size_t i) const;
+#else
+  INLINE const Variable &get_output(size_t i) const;
+#endif
+  INLINE int find_output(CPT_InternalName name) const;
+
+  INLINE size_t get_num_parameters() const;
+#ifdef CPPPARSER
+  INLINE Variable get_parameter(size_t i) const;
+#else
+  INLINE const Variable &get_parameter(size_t i) const;
+#endif
+  INLINE int find_parameter(CPT_InternalName name) const;
+
+  pvector<uint32_t> get_parameter_ids_from_names(const pvector<const InternalName *> &names) const;
+
+  virtual bool link_inputs(const ShaderModule *previous, pmap<int, int> &remap) const;
+  virtual void remap_input_locations(const pmap<int, int> &remap);
+
+  virtual vector_uchar get_code() const=0;
+
+PUBLISHED:
+  MAKE_PROPERTY(stage, get_stage);
+  MAKE_PROPERTY(used_capabilities, get_used_capabilities);
+  MAKE_SEQ_PROPERTY(inputs, get_num_inputs, get_input);
+  MAKE_SEQ_PROPERTY(outputs, get_num_outputs, get_output);
+  MAKE_SEQ_PROPERTY(parameters, get_num_parameters, get_parameter);
+  MAKE_SEQ_PROPERTY(spec_constants, get_num_spec_constants, get_spec_constant);
+  MAKE_PROPERTY(code, get_code);
+
+public:
+  virtual void output(std::ostream &out) const;
+
+  virtual void write_datagram(BamWriter *manager, Datagram &dg) override;
+
+protected:
+  void fillin(DatagramIterator &scan, BamReader *manager) override;
+
+protected:
+  Stage _stage;
+  Filename _source_filename;
+  std::string _source_entry_point;
+
+  // Included files.  Note that this excludes the source file itself, since
+  // we cache modules based on a hash of the contents, and multiple source
+  // files may produce the same hash.
+  struct DependentFile {
+    Filename _pathname;
+    time_t _timestamp;
+    std::streamsize _size;
+  };
+  typedef pvector<DependentFile> DependentFiles;
+  DependentFiles _dependent_files;
+
+  uint64_t _used_caps = 0;
+
+  typedef pvector<Variable> Variables;
+  Variables _inputs;
+  Variables _outputs;
+  Variables _parameters;
+
+  typedef pvector<SpecializationConstant> SpecializationConstants;
+  SpecializationConstants _spec_constants;
+
+  uint32_t _assert_count = 0;
+
+  friend class Shader;
+
+public:
+  static TypeHandle get_class_type() {
+    return _type_handle;
+  }
+  static void init_type() {
+    TypedWritableReferenceCount::init_type();
+    register_type(_type_handle, "ShaderModule",
+                  TypedWritableReferenceCount::get_class_type());
+  }
+  virtual TypeHandle get_type() const override {
+    return get_class_type();
+  }
+  virtual TypeHandle force_init_type() override {
+    init_type();
+    return get_class_type();
+  }
+
+private:
+  static TypeHandle _type_handle;
+};
+
+INLINE std::ostream &operator << (std::ostream &out, const ShaderModule &module) {
+  module.output(out);
+  return out;
+}
+
+#include "shaderModule.I"
+
+#endif

@@ -1,9 +1,9 @@
 from panda3d import core
+from asyncio.exceptions import TimeoutError, CancelledError
 import pytest
 import time
 import sys
-from asyncio.exceptions import TimeoutError, CancelledError
-
+import weakref
 
 class MockFuture:
     _asyncio_future_blocking = False
@@ -30,6 +30,48 @@ class MockFuture:
             raise CancelledError
 
         return self._result
+
+def check_result(fut, expected):
+    """Asserts the result of the future is the expected value."""
+
+    if fut.result() != expected:
+        return False
+
+    if sys.version_info < (3, 5):
+        return True
+
+    # Make sure that await also returns the values properly
+    with pytest.raises(StopIteration) as e:
+        next(fut.__await__())
+    if e.value.value != expected:
+        return False
+
+    return True
+
+
+def test_future_await_send():
+    fut = core.AsyncFuture()
+
+    i = fut.__await__()
+    assert i.send(None) == fut
+    assert i.send(None) == fut
+    assert i.send(None) == fut
+    assert i.send(None) == fut
+
+    fut.set_result(123)
+
+    with pytest.raises(StopIteration) as e:
+        i.send(None)
+
+    assert e.value.value == 123
+
+
+def test_future_await_throw():
+    fut = core.AsyncFuture()
+
+    i = fut.__await__()
+    with pytest.raises(RuntimeError):
+        i.throw(RuntimeError)
 
 
 def test_future_cancelled():
@@ -134,13 +176,29 @@ def test_future_wait_cancel():
         fut.result()
 
 
-def test_task_cancel():
+def test_task_remove():
     task_mgr = core.AsyncTaskManager.get_global_ptr()
     task = core.PythonTask(lambda task: task.done)
     task_mgr.add(task)
 
     assert not task.done()
     task_mgr.remove(task)
+    assert not task.is_alive()
+    assert task.done()
+    assert task.cancelled()
+
+    with pytest.raises(CancelledError):
+        task.result()
+
+
+def test_task_cancel():
+    task_mgr = core.AsyncTaskManager.get_global_ptr()
+    task = core.PythonTask(lambda task: task.done)
+    task_mgr.add(task)
+
+    assert not task.done()
+    task.cancel()
+    assert not task.is_alive()
     assert task.done()
     assert task.cancelled()
 
@@ -447,15 +505,20 @@ def test_future_result():
     ep = core.EventParameter(0.5)
     fut = core.AsyncFuture()
     fut.set_result(ep)
-    assert fut.result() is ep
-    assert fut.result() is ep
+    assert check_result(fut, ep)
+    assert check_result(fut, ep)
 
     # Store TypedObject
     dg = core.Datagram(b"test")
     fut = core.AsyncFuture()
     fut.set_result(dg)
-    assert fut.result() == dg
-    assert fut.result() == dg
+    assert check_result(fut, dg)
+    assert check_result(fut, dg)
+
+    # Store tuple
+    fut = core.AsyncFuture()
+    fut.set_result((1, 2))
+    assert check_result(fut, (1, 2))
 
     # Store arbitrary Python object
     obj = object()
@@ -492,7 +555,7 @@ def test_future_gather():
     assert gather.done()
 
     assert not gather.cancelled()
-    assert tuple(gather.result()) == (1, 2)
+    assert check_result(gather, [1, 2])
 
 
 def test_future_gather_cancel_inner():
@@ -681,3 +744,57 @@ def test_event_future_cancel2():
     assert not fut2.done()
     assert not fut2.cancelled()
 
+def test_task_manager_cleanup_non_panda_future():
+    future = MockFuture()
+    # Create a weakref so we can verify the future was cleaned up.
+    future_ref = weakref.ref(future)
+
+    async def coro_main():
+        return await future
+
+    task = core.PythonTask(coro_main(), 'coro_main')
+    task_mgr = core.AsyncTaskManager.get_global_ptr()
+    task_mgr.add(task)
+    # Poll the task_mgr so the PythonTask starts polling on future.done()
+    task_mgr.poll()
+    future._result = 'Done123'
+    future._state = 'DONE'
+    # Drop our reference to the future, `task` should hold the only reference
+    del future
+    # Recognize the future has completed
+    task_mgr.poll()
+
+    # Verify the task was completed.
+    assert task.result() == 'Done123'
+    del coro_main # this should break the last strong reference to the mock future
+
+    assert future_ref() is None, "MockFuture was not cleaned up!"
+
+def test_await_future_result_cleanup():
+    # Create a simple future and an object for it to return
+    future = core.AsyncFuture()
+
+    class TestObject:
+        pass
+
+    test_result = TestObject()
+    future_result_ref = weakref.ref(test_result)
+
+    # Setup an async environment and dispatch it to a task chain to await the future
+    async def coro_main():
+        nonlocal test_result
+        future.set_result(test_result)
+        del test_result
+        await future
+
+    task = core.PythonTask(coro_main(), 'coro_main')
+    task_mgr = core.AsyncTaskManager.get_global_ptr()
+    task_mgr.add(task)
+    # Poll the task_mgr so the PythonTask starts polling on future.done()
+    task_mgr.poll()
+    # Break all possible references to the future object
+    del task
+    del coro_main
+    del future # this should break the last strong reference to the future
+
+    assert future_result_ref() is None, "TestObject was not cleaned up!"

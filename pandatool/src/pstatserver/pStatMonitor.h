@@ -44,9 +44,9 @@ public:
   PStatMonitor(PStatServer *server = nullptr);
   virtual ~PStatMonitor();
 
-  void hello_from(const std::string &hostname, const std::string &progname,
+  void hello_from(std::string_view hostname, std::string_view progname,
                   int pid);
-  void bad_version(const std::string &hostname, const std::string &progname,
+  void bad_version(std::string_view hostname, std::string_view progname,
                    int pid,
                    int client_major, int client_minor,
                    int server_major, int server_minor);
@@ -104,7 +104,7 @@ public:
 
   virtual PStatGraph *open_timeline();
   virtual PStatGraph *open_strip_chart(int thread_index, int collector_index, bool show_level);
-  virtual PStatGraph *open_flame_graph(int thread_index, int collector_index = -1);
+  virtual PStatGraph *open_flame_graph(int thread_index, int collector_index = -1, int frame_number = -1);
   virtual PStatGraph *open_piano_roll(int thread_index);
 
   void write_datagram(Datagram &dg) const;

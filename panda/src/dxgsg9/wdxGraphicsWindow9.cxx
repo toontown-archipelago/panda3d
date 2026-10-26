@@ -35,13 +35,13 @@ TypeHandle wdxGraphicsWindow9::_type_handle;
  */
 wdxGraphicsWindow9::
 wdxGraphicsWindow9(GraphicsEngine *engine, GraphicsPipe *pipe,
-                   const std::string &name,
+                   std::string name,
                    const FrameBufferProperties &fb_prop,
                    const WindowProperties &win_prop,
                    int flags,
                    GraphicsStateGuardian *gsg,
                    GraphicsOutput *host):
-  WinGraphicsWindow(engine, pipe, name, fb_prop, win_prop, flags, gsg, host)
+  WinGraphicsWindow(engine, pipe, std::move(name), fb_prop, win_prop, flags, gsg, host)
 {
   // don't actually create the window in the constructor.  reason: multi-
   // threading requires panda C++ window object to exist in separate thread
@@ -240,9 +240,8 @@ close_window() {
     _gsg.clear();
   }
 
-  DXGraphicsStateGuardian9::set_cg_device(nullptr);
-
   _dxgsg->release_swap_chain(&_wcontext);
+  _dxgsg = nullptr;
   WinGraphicsWindow::close_window();
 }
 
@@ -1187,7 +1186,7 @@ reset_device_resize_window(UINT new_xsize, UINT new_ysize) {
   if (wdxdisplay9_cat.is_debug()) {
     wdxdisplay9_cat.debug() << "swapchain is " << _wcontext._swap_chain << "\n";
   }
-  _gsg->mark_new();
+  _dxgsg->mark_new();
   init_resized_window();
   return retval;
 }

@@ -30,6 +30,7 @@ TypeHandle VirtualFileMountRamdisk::Directory::_type_handle;
  */
 VirtualFileMountRamdisk::
 VirtualFileMountRamdisk() : _root("") {
+  _root.local_object();
 }
 
 /**
@@ -396,8 +397,8 @@ scan_directory(vector_string &contents, const Filename &dir) const {
  */
 bool VirtualFileMountRamdisk::
 atomic_compare_and_exchange_contents(const Filename &file, string &orig_contents,
-                                     const string &old_contents,
-                                     const string &new_contents) {
+                                     std::string_view old_contents,
+                                     std::string_view new_contents) {
   _lock.lock();
   PT(FileBase) f = _root.do_find_file(file);
   if (f == nullptr || f->is_directory()) {
@@ -409,7 +410,7 @@ atomic_compare_and_exchange_contents(const Filename &file, string &orig_contents
   File *f2 = DCAST(File, f);
   orig_contents = f2->_data.str();
   if (orig_contents == old_contents) {
-    f2->_data.str(new_contents);
+    f2->_data.str(std::string(new_contents));
     f2->_timestamp = time(nullptr);
     retval = true;
   }
@@ -474,11 +475,15 @@ is_directory() const {
  * hierarchy.
  */
 PT(VirtualFileMountRamdisk::FileBase) VirtualFileMountRamdisk::Directory::
-do_find_file(const string &filename) const {
+do_find_file(std::string_view filename) const {
   size_t slash = filename.find('/');
-  if (slash == string::npos) {
+  if (slash == std::string_view::npos) {
+    if (filename.empty()) {
+      return (FileBase *)this;
+    }
+
     // Search for a file within the local directory.
-    FileBase tfile(filename);
+    FileBase tfile{std::string(filename)};
     tfile.local_object();
     Files::const_iterator fi = _files.find(&tfile);
     if (fi != _files.end()) {
@@ -488,9 +493,9 @@ do_find_file(const string &filename) const {
   }
 
   // A nested directory.  Search for the directory name, then recurse.
-  string dirname = filename.substr(0, slash);
-  string remainder = filename.substr(slash + 1);
-  FileBase tfile(dirname);
+  std::string dirname(filename.substr(0, slash));
+  std::string_view remainder = filename.substr(slash + 1);
+  FileBase tfile(std::move(dirname));
   tfile.local_object();
   Files::const_iterator fi = _files.find(&tfile);
   if (fi != _files.end()) {
@@ -508,11 +513,11 @@ do_find_file(const string &filename) const {
  * hierarchy.  If not found, creates a new file.
  */
 PT(VirtualFileMountRamdisk::File) VirtualFileMountRamdisk::Directory::
-do_create_file(const string &filename) {
+do_create_file(std::string_view filename) {
   size_t slash = filename.find('/');
-  if (slash == string::npos) {
+  if (slash == std::string_view::npos) {
     // Search for a file within the local directory.
-    FileBase tfile(filename);
+    FileBase tfile{std::string(filename)};
     tfile.local_object();
     Files::iterator fi = _files.find(&tfile);
     if (fi != _files.end()) {
@@ -529,16 +534,16 @@ do_create_file(const string &filename) {
       express_cat.debug()
         << "Making ramdisk file " << filename << "\n";
     }
-    PT(File) file = new File(filename);
+    PT(File) file = new File(std::string(filename));
     _files.insert(file.p());
     _timestamp = time(nullptr);
     return file;
   }
 
   // A nested directory.  Search for the directory name, then recurse.
-  string dirname = filename.substr(0, slash);
-  string remainder = filename.substr(slash + 1);
-  FileBase tfile(dirname);
+  std::string dirname(filename.substr(0, slash));
+  std::string_view remainder = filename.substr(slash + 1);
+  FileBase tfile(std::move(dirname));
   tfile.local_object();
   Files::iterator fi = _files.find(&tfile);
   if (fi != _files.end()) {
@@ -556,11 +561,11 @@ do_create_file(const string &filename) {
  * hierarchy.  If not found, creates a new directory.
  */
 PT(VirtualFileMountRamdisk::Directory) VirtualFileMountRamdisk::Directory::
-do_make_directory(const string &filename) {
+do_make_directory(std::string_view filename) {
   size_t slash = filename.find('/');
-  if (slash == string::npos) {
+  if (slash == std::string_view::npos) {
     // Search for a file within the local directory.
-    FileBase tfile(filename);
+    FileBase tfile{std::string(filename)};
     tfile.local_object();
     Files::iterator fi = _files.find(&tfile);
     if (fi != _files.end()) {
@@ -577,16 +582,16 @@ do_make_directory(const string &filename) {
       express_cat.debug()
         << "Making ramdisk directory " << filename << "\n";
     }
-    PT(Directory) file = new Directory(filename);
+    PT(Directory) file = new Directory(std::string(filename));
     _files.insert(file.p());
     _timestamp = time(nullptr);
     return file;
   }
 
   // A nested directory.  Search for the directory name, then recurse.
-  string dirname = filename.substr(0, slash);
-  string remainder = filename.substr(slash + 1);
-  FileBase tfile(dirname);
+  std::string dirname(filename.substr(0, slash));
+  std::string_view remainder = filename.substr(slash + 1);
+  FileBase tfile(std::move(dirname));
   tfile.local_object();
   Files::iterator fi = _files.find(&tfile);
   if (fi != _files.end()) {
@@ -604,11 +609,11 @@ do_make_directory(const string &filename) {
  * hierarchy, and removes it.  Returns the removed FileBase object.
  */
 PT(VirtualFileMountRamdisk::FileBase) VirtualFileMountRamdisk::Directory::
-do_delete_file(const string &filename) {
+do_delete_file(std::string_view filename) {
   size_t slash = filename.find('/');
-  if (slash == string::npos) {
+  if (slash == std::string_view::npos) {
     // Search for a file within the local directory.
-    FileBase tfile(filename);
+    FileBase tfile{std::string(filename)};
     tfile.local_object();
     Files::iterator fi = _files.find(&tfile);
     if (fi != _files.end()) {
@@ -628,9 +633,9 @@ do_delete_file(const string &filename) {
   }
 
   // A nested directory.  Search for the directory name, then recurse.
-  string dirname = filename.substr(0, slash);
-  string remainder = filename.substr(slash + 1);
-  FileBase tfile(dirname);
+  std::string dirname(filename.substr(0, slash));
+  std::string_view remainder = filename.substr(slash + 1);
+  FileBase tfile(std::move(dirname));
   tfile.local_object();
   Files::iterator fi = _files.find(&tfile);
   if (fi != _files.end()) {

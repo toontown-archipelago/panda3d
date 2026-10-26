@@ -1,0 +1,5 @@
+#include "config_shaderpipeline.cxx"
+#include "shaderModuleGlsl.cxx"
+#include "shaderModuleSpirV.cxx"
+#include "shaderCompilerGlslang.cxx"
+#include "shaderCompilerGlslPreProc.cxx"

@@ -54,7 +54,8 @@ GtkStatsTimeline(GtkStatsMonitor *monitor) :
                    G_CALLBACK(thread_area_draw_callback), this);
 
   // Listen for mouse wheel and keyboard events.
-  gtk_widget_add_events(_graph_window, GDK_SCROLL_MASK |
+  gtk_widget_add_events(_graph_window, GDK_SMOOTH_SCROLL_MASK |
+                                       GDK_SCROLL_MASK |
                                        GDK_KEY_PRESS_MASK |
                                        GDK_KEY_RELEASE_MASK);
   gtk_widget_set_can_focus(_graph_window, TRUE);
@@ -64,6 +65,25 @@ GtkStatsTimeline(GtkStatsMonitor *monitor) :
                    G_CALLBACK(key_press_callback), this);
   g_signal_connect(G_OBJECT(_graph_window), "key_release_event",
                    G_CALLBACK(key_release_callback), this);
+
+  // Set up trackpad pinch and swipe gestures.
+  _zoom_gesture = gtk_gesture_zoom_new(_graph_window);
+  g_signal_connect(_zoom_gesture, "begin",
+    G_CALLBACK(+[](GtkGestureZoom *gesture, GdkEventSequence *sequence, gpointer data) {
+      GtkStatsTimeline *self = (GtkStatsTimeline *)data;
+      self->_zoom_scale = self->get_horizontal_scale();
+    }), this);
+
+  g_signal_connect(_zoom_gesture, "scale-changed",
+    G_CALLBACK((+[](GtkGestureZoom *gesture, gdouble scale, gpointer data) {
+      GtkStatsTimeline *self = (GtkStatsTimeline *)data;
+      gdouble x, y;
+      if (gtk_gesture_get_point(GTK_GESTURE(gesture), NULL, &x, &y)) {
+        int graph_x = (int)(x * self->_cr_scale);
+        self->zoom_by(log(scale) * 0.8, self->pixel_to_timestamp(graph_x));
+        self->start_animation();
+      }
+    })), this);
 
   int min_height = 0;
   if (!_threads.empty()) {
@@ -100,6 +120,7 @@ GtkStatsTimeline(GtkStatsMonitor *monitor) :
 GtkStatsTimeline::
 ~GtkStatsTimeline() {
   cairo_pattern_destroy(_grid_pattern);
+  g_object_unref(_zoom_gesture);
 }
 
 /**
@@ -180,7 +201,7 @@ draw_guide_bar(int x, GuideBarStyle style) {
  */
 void GtkStatsTimeline::
 draw_bar(int row, int from_x, int to_x, int collector_index,
-         const std::string &collector_name) {
+         std::string_view collector_name) {
   int top = row_to_pixel(row);
   int bottom = row_to_pixel(row + 1);
   int scale = _pixel_scale;
@@ -217,7 +238,8 @@ draw_bar(int row, int from_x, int to_x, int collector_index,
 
       // Make sure that the text doesn't run off the chart.
       int text_width, text_height;
-      PangoLayout *layout = gtk_widget_create_pango_layout(_graph_window, collector_name.c_str());
+      PangoLayout *layout = gtk_widget_create_pango_layout(_graph_window, nullptr);
+      pango_layout_set_text(layout, collector_name.data(), collector_name.size());
       pango_layout_set_attributes(layout, _pango_attrs);
       pango_layout_set_height(layout, -1);
       pango_layout_get_pixel_size(layout, &text_width, &text_height);
@@ -231,12 +253,12 @@ draw_bar(int row, int from_x, int to_x, int collector_index,
         size_t c = collector_name.rfind(':');
         if (text_right - text_left < scale * 6) {
           // It's a really tiny space.  Draw a single letter.
-          const char *ch = collector_name.data() + (c != std::string::npos ? c + 1 : 0);
+          const char *ch = collector_name.data() + (c != std::string_view::npos ? c + 1 : 0);
           pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
           pango_layout_set_text(layout, ch, 1);
         } else {
           // Maybe just use everything after the last colon.
-          if (c != std::string::npos) {
+          if (c != std::string_view::npos) {
             pango_layout_set_text(layout, collector_name.data() + c + 1,
                                           collector_name.size() - c - 1);
             pango_layout_get_pixel_size(layout, &text_width, &text_height);
@@ -409,8 +431,8 @@ handle_button_press(int graph_x, int graph_y, bool double_click, int button) {
 
         {
           const GtkStatsMonitor::MenuDef *menu_def = GtkStatsGraph::_monitor->add_menu({
+            GtkStatsMonitor::CT_strip_chart,
             bar._thread_index, bar._collector_index,
-            GtkStatsMonitor::CT_strip_chart, false,
           });
 
           GtkWidget *menu_item = gtk_menu_item_new_with_label("Open Strip Chart");
@@ -422,8 +444,8 @@ handle_button_press(int graph_x, int graph_y, bool double_click, int button) {
 
         {
           const GtkStatsMonitor::MenuDef *menu_def = GtkStatsGraph::_monitor->add_menu({
-            bar._thread_index, bar._collector_index,
             GtkStatsMonitor::CT_flame_graph,
+            bar._thread_index, bar._collector_index, bar._frame_number,
           });
 
           GtkWidget *menu_item = gtk_menu_item_new_with_label("Open Flame Graph");
@@ -435,7 +457,7 @@ handle_button_press(int graph_x, int graph_y, bool double_click, int button) {
 
         {
           const GtkStatsMonitor::MenuDef *menu_def = GtkStatsGraph::_monitor->add_menu({
-            bar._thread_index, -1, GtkStatsMonitor::CT_piano_roll,
+            GtkStatsMonitor::CT_piano_roll, bar._thread_index, -1,
           });
 
           GtkWidget *menu_item = gtk_menu_item_new_with_label("Open Piano Roll");
@@ -452,8 +474,7 @@ handle_button_press(int graph_x, int graph_y, bool double_click, int button) {
 
         {
           const GtkStatsMonitor::MenuDef *menu_def = GtkStatsGraph::_monitor->add_menu({
-            -1, bar._collector_index,
-            GtkStatsMonitor::CT_choose_color,
+            GtkStatsMonitor::CT_choose_color, -1, bar._collector_index,
           });
 
           GtkWidget *menu_item = gtk_menu_item_new_with_label("Change Color...");
@@ -465,8 +486,7 @@ handle_button_press(int graph_x, int graph_y, bool double_click, int button) {
 
         {
           const GtkStatsMonitor::MenuDef *menu_def = GtkStatsGraph::_monitor->add_menu({
-            -1, bar._collector_index,
-            GtkStatsMonitor::CT_reset_color,
+            GtkStatsMonitor::CT_reset_color, -1, bar._collector_index,
           });
 
           GtkWidget *menu_item = gtk_menu_item_new_with_label("Reset Color");
@@ -627,6 +647,16 @@ handle_scroll(int graph_x, int graph_y, double dx, double dy, bool ctrl_held) {
   }
 
   return handled;
+}
+
+/**
+ *
+ */
+gboolean GtkStatsTimeline::
+handle_zoom(int graph_x, int graph_y, double scale) {
+  zoom_to(get_horizontal_scale() / scale, pixel_to_timestamp(graph_x));
+  start_animation();
+  return TRUE;
 }
 
 /**

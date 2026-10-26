@@ -87,6 +87,9 @@ set_shader(const Shader *s, int priority) const {
   result->_shader_priority = priority;
   result->_auto_shader = false;
   result->_has_shader = true;
+  if (s != nullptr && s->_subsumes_alpha_test) {
+    result->_flags |= ShaderAttrib::F_subsume_alpha_test;
+  }
   return return_new(result);
 }
 
@@ -273,7 +276,7 @@ clear_shader_input(const InternalName *id) const {
  *
  */
 CPT(RenderAttrib) ShaderAttrib::
-clear_shader_input(const std::string &id) const {
+clear_shader_input(std::string_view id) const {
   return clear_shader_input(InternalName::make(id));
 }
 
@@ -306,7 +309,7 @@ get_shader_input(const InternalName *id) const {
  * function does not return NULL --- it returns the "blank" ShaderInput.
  */
 const ShaderInput &ShaderAttrib::
-get_shader_input(const std::string &id) const {
+get_shader_input(std::string_view id) const {
   return get_shader_input(InternalName::make(id));
 }
 
@@ -344,7 +347,7 @@ get_shader_input_nodepath(const InternalName *id) const {
  * if it is not a vector.
  */
 LVecBase4 ShaderAttrib::
-get_shader_input_vector(InternalName *id) const {
+get_shader_input_vector(const InternalName *id) const {
   static LVecBase4 resfail(0,0,0,0);
   Inputs::const_iterator i = _inputs.find(id);
   if (i != _inputs.end()) {
@@ -357,22 +360,28 @@ get_shader_input_vector(InternalName *id) const {
       const Shader::ShaderPtrData &ptr = p.get_ptr();
 
       switch (ptr._type) {
-      case Shader::SPT_float:
+      case ShaderType::ST_float:
         {
           LVector4f vectorf;
           memcpy(&vectorf[0], ptr._ptr, sizeof(float) * ptr._size);
           return LCAST(PN_stdfloat, vectorf);
         }
-      case Shader::SPT_double:
+      case ShaderType::ST_double:
         {
           LVector4d vectord;
           memcpy(&vectord[0], ptr._ptr, sizeof(double) * ptr._size);
           return LCAST(PN_stdfloat, vectord);
         }
+      case ShaderType::ST_int:
+        {
+          LVector4i vectori;
+          memcpy(&vectori[0], ptr._ptr, sizeof(int) * ptr._size);
+          return LCAST(PN_stdfloat, vectori);
+        }
       default:
        {
           ostringstream strm;
-          strm << "Shader input " << id->get_name() << " does not contain floating-point data.\n";
+          strm << "Shader input " << id->get_name() << " does not contain numeric data.\n";
           nassert_raise(strm.str());
           return resfail;
         }
@@ -444,25 +453,26 @@ get_shader_input_ptr(const InternalName *id, Shader::ShaderPtrData &data) const 
         if (param->is_of_type(ParamVecBase4f::get_class_type())) {
           data._ptr = (void *)((const ParamVecBase4f *)param)->get_value().get_data();
           data._size = 4;
-          data._type = Shader::SPT_float;
+          data._type = ShaderType::ST_float;
           return true;
         }
         else if (param->is_of_type(ParamVecBase4i::get_class_type())) {
           data._ptr = (void *)((const ParamVecBase4i *)param)->get_value().get_data();
           data._size = 4;
-          data._type = Shader::SPT_int;
+          data._type = ShaderType::ST_int;
           return true;
         }
         else if (param->is_of_type(ParamVecBase4d::get_class_type())) {
           data._ptr = (void *)((const ParamVecBase4d *)param)->get_value().get_data();
           data._size = 4;
-          data._type = Shader::SPT_float;
+          data._type = ShaderType::ST_double;
           return true;
         }
       }
     }
     ostringstream strm;
-    strm << "Shader input " << id->get_name() << " was given an incompatible parameter type.\n";
+    strm << "Shader input " << id->get_name() << " was given an incompatible parameter type ("
+         << p.get_value_type() << ").\n";
     nassert_raise(strm.str());
     return false;
   } else {
@@ -520,19 +530,62 @@ get_shader_input_texture(const InternalName *id, SamplerState *sampler) const {
 }
 
 /**
+ *
+ */
+Texture *ShaderAttrib::
+get_shader_input_texture_image(const InternalName *id, ShaderType::Access &access, int &z, int &n) const {
+  PT(Texture) tex;
+
+  Inputs::const_iterator i = _inputs.find(id);
+  if (i != _inputs.end()) {
+    const ShaderInput &p = (*i).second;
+    const ParamTextureImage *param = nullptr;
+
+    switch (p.get_value_type()) {
+    case ShaderInput::M_texture_image:
+      param = (const ParamTextureImage *)p.get_param();
+      tex = param->get_texture();
+      z = param->get_bind_layered() ? -1 : param->get_bind_layer();
+      n = param->get_bind_level();
+      break;
+
+    case ShaderInput::M_texture:
+      // People find it convenient to be able to pass a texture without
+      // further ado.
+      tex = p.get_texture();
+      access = ShaderType::Access::READ_WRITE;
+      z = -1;
+      n = 0;
+      break;
+
+    default:
+      ostringstream strm;
+      strm << "Shader input " << id->get_name() << " is not a texture.\n";
+      nassert_raise(strm.str());
+    }
+  } else {
+    ostringstream strm;
+    strm << "Shader input " << id->get_name() << " is not present.\n";
+    nassert_raise(strm.str());
+  }
+
+  return tex;
+}
+
+/**
  * Returns the ShaderInput as a matrix.  Assertion fails if there is none, or
  * if it is not a matrix or NodePath.
  */
-const LMatrix4 &ShaderAttrib::
-get_shader_input_matrix(const InternalName *id, LMatrix4 &matrix) const {
+const LMatrix4f &ShaderAttrib::
+get_shader_input_matrix(const InternalName *id, LMatrix4f &matrix) const {
   Inputs::const_iterator i = _inputs.find(id);
   if (i != _inputs.end()) {
     const ShaderInput &p = (*i).second;
 
     if (p.get_value_type() == ShaderInput::M_nodepath) {
       const NodePath &np = p.get_nodepath();
-      nassertr(!np.is_empty(), LMatrix4::ident_mat());
-      matrix = np.get_transform()->get_mat();
+      nassertr(!np.is_empty(), LMatrix4f::ident_mat());
+      matrix = LCAST(float, np.get_transform()->get_mat());
       return matrix;
 
     } else if (p.get_value_type() == ShaderInput::M_numeric &&
@@ -540,23 +593,21 @@ get_shader_input_matrix(const InternalName *id, LMatrix4 &matrix) const {
       const Shader::ShaderPtrData &ptr = p.get_ptr();
 
       switch (ptr._type) {
-        case Shader::SPT_float: {
-          LMatrix4f matrixf;
-          memcpy(&matrixf(0, 0), ptr._ptr, sizeof(float) * 16);
-          matrix = LCAST(PN_stdfloat, matrixf);
+        case ShaderType::ST_float: {
+          memcpy(&matrix(0, 0), ptr._ptr, sizeof(float) * 16);
           return matrix;
         }
-        case Shader::SPT_double: {
+        case ShaderType::ST_double: {
           LMatrix4d matrixd;
           memcpy(&matrixd(0, 0), ptr._ptr, sizeof(double) * 16);
-          matrix = LCAST(PN_stdfloat, matrixd);
+          matrix = LCAST(float, matrixd);
           return matrix;
         }
         default: {
           ostringstream strm;
           strm << "Shader input " << id->get_name() << " does not contain floating-point data.\n";
           nassert_raise(strm.str());
-          return LMatrix4::ident_mat();
+          return LMatrix4f::ident_mat();
         }
       }
     }
@@ -564,12 +615,64 @@ get_shader_input_matrix(const InternalName *id, LMatrix4 &matrix) const {
     ostringstream strm;
     strm << "Shader input " << id->get_name() << " is not a NodePath, LMatrix4 or PTA_LMatrix4.\n";
     nassert_raise(strm.str());
-    return LMatrix4::ident_mat();
+    return LMatrix4f::ident_mat();
   } else {
     ostringstream strm;
     strm << "Shader input " << id->get_name() << " is not present.\n";
     nassert_raise(strm.str());
-    return LMatrix4::ident_mat();
+    return LMatrix4f::ident_mat();
+  }
+}
+
+/**
+ * Returns the ShaderInput as a matrix.  Assertion fails if there is none, or
+ * if it is not a matrix or NodePath.
+ */
+const LMatrix4d &ShaderAttrib::
+get_shader_input_matrix(const InternalName *id, LMatrix4d &matrix) const {
+  Inputs::const_iterator i = _inputs.find(id);
+  if (i != _inputs.end()) {
+    const ShaderInput &p = (*i).second;
+
+    if (p.get_value_type() == ShaderInput::M_nodepath) {
+      const NodePath &np = p.get_nodepath();
+      nassertr(!np.is_empty(), LMatrix4d::ident_mat());
+      matrix = LCAST(double, np.get_transform()->get_mat());
+      return matrix;
+
+    } else if (p.get_value_type() == ShaderInput::M_numeric &&
+               p.get_ptr()._size >= 16 && (p.get_ptr()._size & 15) == 0) {
+      const Shader::ShaderPtrData &ptr = p.get_ptr();
+
+      switch (ptr._type) {
+        case ShaderType::ST_float: {
+          LMatrix4f matrixf;
+          memcpy(&matrixf(0, 0), ptr._ptr, sizeof(float) * 16);
+          matrix = LCAST(double, matrixf);
+          return matrix;
+        }
+        case ShaderType::ST_double: {
+          memcpy(&matrix(0, 0), ptr._ptr, sizeof(double) * 16);
+          return matrix;
+        }
+        default: {
+          ostringstream strm;
+          strm << "Shader input " << id->get_name() << " does not contain floating-point data.\n";
+          nassert_raise(strm.str());
+          return LMatrix4d::ident_mat();
+        }
+      }
+    }
+
+    ostringstream strm;
+    strm << "Shader input " << id->get_name() << " is not a NodePath, LMatrix4 or PTA_LMatrix4.\n";
+    nassert_raise(strm.str());
+    return LMatrix4d::ident_mat();
+  } else {
+    ostringstream strm;
+    strm << "Shader input " << id->get_name() << " is not present.\n";
+    nassert_raise(strm.str());
+    return LMatrix4d::ident_mat();
   }
 }
 
@@ -791,9 +894,74 @@ compose_impl(const RenderAttrib *other) const {
 }
 
 /**
- * Factory method to generate a Shader object
+ * Tells the BamReader how to create objects of type ShaderAttrib.
  */
 void ShaderAttrib::
 register_with_read_factory() {
-  // IMPLEMENT ME
+  BamReader::get_factory()->register_factory(get_class_type(), make_from_bam);
+}
+
+/**
+ * Writes the contents of this object to the datagram for shipping out to a
+ * Bam file.
+ */
+void ShaderAttrib::
+write_datagram(BamWriter *manager, Datagram &dg) {
+  RenderAttrib::write_datagram(manager, dg);
+
+  manager->write_pointer(dg, _shader);
+
+  dg.add_int32(_shader_priority);
+  dg.add_bool(_auto_shader);
+  dg.add_bool(_has_shader);
+  dg.add_int32(_flags);
+  dg.add_int32(_has_flags);
+  dg.add_int32(_instance_count);
+  dg.add_uint32(0);
+}
+
+/**
+ * Receives an array of pointers, one for each time manager->read_pointer()
+ * was called in fillin(). Returns the number of pointers processed.
+ */
+int ShaderAttrib::
+complete_pointers(TypedWritable **p_list, BamReader *manager) {
+  int pi = RenderAttrib::complete_pointers(p_list, manager);
+  _shader = DCAST(Shader, p_list[pi++]);
+  return pi;
+}
+
+/**
+ * This function is called by the BamReader's factory when a new object of
+ * type ShaderAttrib is encountered in the Bam file.  It should create the
+ * ShaderAttrib and extract its information from the file.
+ */
+TypedWritable *ShaderAttrib::
+make_from_bam(const FactoryParams &params) {
+  ShaderAttrib *attrib = new ShaderAttrib;
+  DatagramIterator scan;
+  BamReader *manager;
+
+  parse_params(params, scan, manager);
+  attrib->fillin(scan, manager);
+
+  return attrib;
+}
+
+/**
+ * This internal function is called by make_from_bam to read in all of the
+ * relevant data from the BamFile for the new ShaderAttrib.
+ */
+void ShaderAttrib::
+fillin(DatagramIterator &scan, BamReader *manager) {
+  RenderAttrib::fillin(scan, manager);
+
+  manager->read_pointer(scan);
+  _shader_priority = scan.get_int32();
+  _auto_shader = scan.get_bool();
+  _has_shader = scan.get_bool();
+  _flags = scan.get_int32();
+  _has_flags = scan.get_int32();
+  _instance_count = scan.get_int32();
+  scan.get_uint32();
 }

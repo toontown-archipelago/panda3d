@@ -1,4 +1,4 @@
-#version 150
+#version 330
 
 // Uniform inputs
 uniform mat4 p3d_ModelViewProjectionMatrix;

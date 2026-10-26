@@ -51,8 +51,8 @@ PT(Texture) OccluderNode::_viz_tex;
  * vertices with set_vertices().
  */
 OccluderNode::
-OccluderNode(const std::string &name) :
-  PandaNode(name)
+OccluderNode(std::string name) :
+  PandaNode(std::move(name))
 {
   set_cull_callback();
   set_renderable();
@@ -141,17 +141,15 @@ bool OccluderNode::
 cull_callback(CullTraverser *trav, CullTraverserData &data) {
   // Normally, an OccluderNode is invisible.  But if someone shows it, we will
   // draw a visualization, a checkerboard-textured polygon.
-  CullableObject *occluder_viz =
-    new CullableObject(get_occluder_viz(trav, data), get_occluder_viz_state(trav, data),
-                       data.get_internal_transform(trav));
-  trav->get_cull_handler()->record_object(occluder_viz, trav);
+  trav->get_cull_handler()->record_object(CullableObject(
+    get_occluder_viz(trav, data), get_occluder_viz_state(trav, data),
+    data.get_internal_transform(trav)), trav);
 
   // Also get the frame.
   nassertr(_frame_viz != nullptr, false);
-  CullableObject *frame_viz =
-    new CullableObject(_frame_viz, get_frame_viz_state(trav, data),
-                       data.get_internal_transform(trav));
-  trav->get_cull_handler()->record_object(frame_viz, trav);
+  trav->get_cull_handler()->record_object(CullableObject(
+    _frame_viz, get_frame_viz_state(trav, data),
+    data.get_internal_transform(trav)), trav);
 
   // Now carry on to render our child nodes.
   return true;

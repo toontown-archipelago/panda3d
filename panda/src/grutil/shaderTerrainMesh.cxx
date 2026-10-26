@@ -46,13 +46,13 @@ ConfigVariableBool stm_use_hexagonal_layout
           "visible due to the vertices not matching exactly."));
 
 ConfigVariableInt stm_max_chunk_count
-("stm-max-chunk-count", 2048,
+("stm-max-chunk-count", 1024,
  PRC_DESC("Controls the maximum amount of chunks the Terrain can display. If you use "
           "a high LOD, you might have to increment this value. The lower this value is "
           "the less data has to be transferred to the GPU."));
 
 ConfigVariableInt stm_max_views
-("stm-max-views", 8,
+("stm-max-views", 4,
  PRC_DESC("Controls the maximum amount of different views the Terrain can be rendered "
           "with. Each camera rendering the terrain corresponds to a view. Lowering this "
           "value will reduce the data that has to be transferred to the GPU."));
@@ -544,8 +544,8 @@ void ShaderTerrainMesh::add_for_draw(CullTraverser *trav, CullTraverserData &dat
   state = state->set_attrib(current_shader_attrib, 10000);
 
   // Emit chunk
-  CullableObject *object = new CullableObject(_chunk_geom, std::move(state), std::move(modelview_transform));
-  trav->get_cull_handler()->record_object(object, trav);
+  trav->get_cull_handler()->record_object(CullableObject(
+    _chunk_geom, std::move(state), std::move(modelview_transform)), trav);
 
   // After rendering, increment the view index
   ++_current_view_index;
@@ -719,7 +719,7 @@ bool ShaderTerrainMesh::do_check_lod_matches(Chunk* chunk, TraversalData* data) 
   max_edge = csqrt(max_edge);
 
   PN_stdfloat tesselation_factor = (max_edge / _target_triangle_width) / (PN_stdfloat)_chunk_size;
-  PN_stdfloat clod_factor = max(0.0, min(1.0, 2.0 - tesselation_factor));
+  PN_stdfloat clod_factor = std::clamp(2.0 - tesselation_factor, 0.0, 1.0);
 
   // Store the clod factor
   chunk->last_clod = clod_factor;

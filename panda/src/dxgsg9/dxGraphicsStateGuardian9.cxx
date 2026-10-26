@@ -65,9 +65,6 @@
 #include "wdxGraphicsBuffer9.h"
 #include "config_pgraph.h"
 #include "shaderGenerator.h"
-#ifdef HAVE_CG
-#include <Cg/cgD3D9.h>
-#endif
 
 #include <mmsystem.h>
 
@@ -88,10 +85,6 @@ D3DMATRIX DXGraphicsStateGuardian9::_d3d_ident_mat;
 unsigned char *DXGraphicsStateGuardian9::_temp_buffer = nullptr;
 unsigned char *DXGraphicsStateGuardian9::_safe_buffer_start = nullptr;
 
-#ifdef HAVE_CG
-LPDIRECT3DDEVICE9 DXGraphicsStateGuardian9::_cg_device = nullptr;
-#endif
-
 #define __D3DLIGHT_RANGE_MAX ((PN_stdfloat)sqrt(FLT_MAX))  //for some reason this is missing in dx9 hdrs
 
 #define MY_D3DRGBA(r, g, b, a) ((D3DCOLOR) D3DCOLOR_COLORVALUE(r, g, b, a))
@@ -101,7 +94,7 @@ LPDIRECT3DDEVICE9 DXGraphicsStateGuardian9::_cg_device = nullptr;
  */
 DXGraphicsStateGuardian9::
 DXGraphicsStateGuardian9(GraphicsEngine *engine, GraphicsPipe *pipe) :
-  GraphicsStateGuardian(CS_yup_left, engine, pipe)
+  GraphicsStateGuardian(dx_coordinate_system, engine, pipe)
 {
   if (dxgsg9_cat.is_debug()) {
     dxgsg9_cat.debug()
@@ -140,7 +133,8 @@ DXGraphicsStateGuardian9(GraphicsEngine *engine, GraphicsPipe *pipe) :
 
   _last_fvf = 0;
   _num_bound_streams = 0;
-  _white_vbuffer = nullptr;
+  _instancing_enabled = false;
+  _constant_vbuffer = nullptr;
 
   _vertex_shader_version_major = 0;
   _vertex_shader_version_minor = 0;
@@ -150,13 +144,7 @@ DXGraphicsStateGuardian9(GraphicsEngine *engine, GraphicsPipe *pipe) :
   _vertex_shader_profile = 0;
   _pixel_shader_profile = 0;
 
-  _vertex_shader_maximum_constants = 0;
-
   _supports_stream_offset = false;
-
-#ifdef HAVE_CG
-  _cg_context = 0;
-#endif
 
   get_gamma_table();
   atexit (atexit_function);
@@ -175,8 +163,6 @@ DXGraphicsStateGuardian9::
   if (IS_VALID_PTR(_d3d_device)) {
     _d3d_device->SetTexture(0, nullptr);  // this frees reference to the old texture
   }
-
-  free_nondx_resources();
 }
 
 /**
@@ -395,36 +381,10 @@ extract_texture_data(Texture *tex) {
  */
 ShaderContext *DXGraphicsStateGuardian9::
 prepare_shader(Shader *se) {
+  nassertr(get_supports_basic_shaders(), nullptr);
+
   PStatTimer timer(_prepare_shader_pcollector);
-
-  switch (se->get_language()) {
-  case Shader::SL_GLSL:
-    dxgsg9_cat.error()
-      << "Tried to load GLSL shader, but GLSL shaders not supported by Direct3D 9.\n";
-    return nullptr;
-
-  case Shader::SL_Cg:
-#ifdef HAVE_CG
-    if (_supports_basic_shaders) {
-      return new DXShaderContext9(se, this);
-    } else {
-      dxgsg9_cat.error()
-        << "Tried to load Cg shader, but basic shaders not supported.\n";
-      return nullptr;
-    }
-#else
-    dxgsg9_cat.error()
-      << "Tried to load Cg shader, but Cg support not compiled in.\n";
-    return nullptr;
-#endif
-
-  default:
-    dxgsg9_cat.error()
-      << "Tried to load shader with unsupported shader language!\n";
-    return nullptr;
-  }
-
-  return nullptr;
+  return new DXShaderContext9(se, this);
 }
 
 /**
@@ -944,7 +904,7 @@ calc_projection_mat(const Lens *lens) {
      0, 0, 0.5, 1);
 
   LMatrix4 result =
-    LMatrix4::convert_mat(CS_yup_left, _current_lens->get_coordinate_system()) *
+    LMatrix4::convert_mat(_internal_coordinate_system, _current_lens->get_coordinate_system()) *
     lens->get_projection_mat(_current_stereo_channel) *
     rescale_mat;
 
@@ -1075,11 +1035,17 @@ void DXGraphicsStateGuardian9::
 end_scene() {
   GraphicsStateGuardian::end_scene();
 
-  if (_vertex_array_shader_context != 0) {
-    _vertex_array_shader_context->disable_shader_vertex_arrays(this);
-    _vertex_array_shader = nullptr;
-    _vertex_array_shader_context = nullptr;
+  // Unbind streams.
+  _d3d_device->SetVertexDeclaration(nullptr);
+  for (int array_index = 0; array_index < _num_bound_streams; ++array_index) {
+    _d3d_device->SetStreamSource(array_index, nullptr, 0, 0);
+    if (_instancing_enabled) {
+      _d3d_device->SetStreamSourceFreq(array_index, 1);
+    }
   }
+  _num_bound_streams = 0;
+  _instancing_enabled = false;
+
   if (_texture_binding_shader_context != 0) {
     _texture_binding_shader_context->disable_shader_texture_bindings(this);
     _texture_binding_shader = nullptr;
@@ -1167,17 +1133,19 @@ end_frame(Thread *current_thread) {
 bool DXGraphicsStateGuardian9::
 begin_draw_primitives(const GeomPipelineReader *geom_reader,
                       const GeomVertexDataPipelineReader *data_reader,
-                      size_t num_instances, bool force) {
-  if (!GraphicsStateGuardian::begin_draw_primitives(geom_reader, data_reader, num_instances, force)) {
+                      const InstanceList *instances, bool force) {
+  if (!GraphicsStateGuardian::begin_draw_primitives(geom_reader, data_reader, instances, force)) {
     return false;
   }
   nassertr(_data_reader != nullptr, false);
 
   const GeomVertexFormat *format = _data_reader->get_format();
+  LPDIRECT3DDEVICE9 device = _d3d_device;
 
   const GeomVertexAnimationSpec &animation =
     data_reader->get_format()->get_animation();
-  if (animation.get_animation_type() == Geom::AT_hardware) {
+  if (animation.get_animation_type() == Geom::AT_hardware &&
+      _current_shader_context == nullptr) {
     // Set up vertex blending.
     switch (animation.get_num_transforms()) {
     case 1:
@@ -1212,7 +1180,7 @@ begin_draw_primitives(const GeomPipelineReader *geom_reader,
         LMatrix4 mat;
         table->get_transform(i)->mult_matrix(mat, _internal_transform->get_mat());
         const D3DMATRIX *d3d_mat = (const D3DMATRIX *)mat.get_data();
-        _d3d_device->SetTransform(D3DTS_WORLDMATRIX(i), d3d_mat);
+        device->SetTransform(D3DTS_WORLDMATRIX(i), d3d_mat);
       }
 
       // Setting the first animation matrix steps on the world matrix, so we
@@ -1231,7 +1199,7 @@ begin_draw_primitives(const GeomPipelineReader *geom_reader,
 
     if (_transform_stale && !_data_reader->is_vertex_transformed()) {
       const D3DMATRIX *d3d_mat = (const D3DMATRIX *)_internal_transform->get_mat().get_data();
-      _d3d_device->SetTransform(D3DTS_WORLD, d3d_mat);
+      device->SetTransform(D3DTS_WORLD, d3d_mat);
       _transform_stale = false;
     }
   }
@@ -1244,7 +1212,7 @@ begin_draw_primitives(const GeomPipelineReader *geom_reader,
     // It's tempting just to use the D3DFVF_XYZRHW specification on these
     // vertices, but that turns out to be a bigger hammer than we want: that
     // also prevents lighting calculations and user clip planes.
-    _d3d_device->SetTransform(D3DTS_WORLD, &_d3d_ident_mat);
+    device->SetTransform(D3DTS_WORLD, &_d3d_ident_mat);
     static const LMatrix4f rescale_mat
       (1, 0, 0, 0,
        0, 1, 0, 0,
@@ -1252,34 +1220,112 @@ begin_draw_primitives(const GeomPipelineReader *geom_reader,
        0, 0, 0.5, 1);
     _transform_stale = true;
 
-    _d3d_device->SetTransform(D3DTS_PROJECTION, (const D3DMATRIX *)rescale_mat.get_data());
+    device->SetTransform(D3DTS_PROJECTION, (const D3DMATRIX *)rescale_mat.get_data());
   }
 
-  if (_current_shader_context == 0 /*|| !_current_shader_context->uses_custom_vertex_arrays()*/) {
-    // No shader, or a non-Cg shader.
-    if (_vertex_array_shader_context != 0) {
-      _vertex_array_shader_context->disable_shader_vertex_arrays(this);
-    }
+  if (_current_shader_context == nullptr) {
+    // No shader.
+    device->SetVertexDeclaration(nullptr);
     if (!update_standard_vertex_arrays(force)) {
       return false;
     }
   } else {
-    // Cg shader.
-    if (_vertex_array_shader_context == 0) {
-      disable_standard_vertex_arrays();
-      if (!_current_shader_context->update_shader_vertex_arrays(nullptr, this, force)) {
-        return false;
-      }
-    } else {
-      if (!_current_shader_context->
-          update_shader_vertex_arrays(_vertex_array_shader_context, this, force)) {
-        return false;
+    // Set the vertex declaration for the shader.
+    BitMask32 used_streams;
+    LPDIRECT3DVERTEXDECLARATION9 decl =
+      _current_shader_context->get_vertex_declaration(this, format, used_streams);
+    if (decl == nullptr) {
+      return false;
+    }
+
+    HRESULT hr = device->SetVertexDeclaration(decl);
+    if (FAILED(hr)) {
+      dxgsg9_cat.error()
+        << "SetVertexDeclaration failed: " << D3DERRORSTRING(hr);
+      return false;
+    }
+
+    size_t num_instances = 1;
+    if (instances != nullptr) {
+      num_instances = instances->size();
+    }
+    if (num_instances == 1 && _instancing_enabled) {
+      // Reset the divisors.
+      for (size_t i = 0; i < _num_bound_streams; ++i) {
+        _d3d_device->SetStreamSourceFreq(i, 1);
       }
     }
-  }
 
-  _vertex_array_shader = _current_shader;
-  _vertex_array_shader_context = _current_shader_context;
+    // Prepare and bind the vertex buffers.
+    size_t num_arrays = _data_reader->get_num_arrays();
+    size_t i;
+    for (i = 0; i < num_arrays; ++i) {
+      const GeomVertexArrayDataHandle *array_reader = _data_reader->get_array_reader(i);
+      if (!used_streams.get_bit(i)) {
+        _d3d_device->SetStreamSource(i, nullptr, 0, 0);
+        continue;
+      }
+
+      // Get the vertex buffer for this array.
+      DXVertexBufferContext9 *dvbc;
+      if (!setup_array_data(dvbc, array_reader, force)) {
+        dxgsg9_cat.error()
+          << "Unable to setup vertex buffer for array " << i << "\n";
+        _d3d_device->SetStreamSource(i, nullptr, 0, 0);
+        continue;
+      }
+
+      // Determine stride and divisor.
+      const GeomVertexArrayFormat *array_format = array_reader->get_array_format();
+      int stride = array_format->get_stride();
+      int divisor = array_format->get_divisor();
+      if (num_instances == 1) {
+        if (divisor != 0) {
+          // With only one instance, this is equivalent.
+          stride = 0;
+        }
+      }
+      else if (divisor == 0) {
+        _d3d_device->SetStreamSourceFreq(i, D3DSTREAMSOURCE_INDEXEDDATA | num_instances);
+      }
+      else {
+        _d3d_device->SetStreamSourceFreq(i, D3DSTREAMSOURCE_INSTANCEDATA | divisor);
+      }
+
+      // Bind this array as the data source for the corresponding stream.
+      hr = device->SetStreamSource(i, dvbc->_vbuffer, 0, stride);
+      if (FAILED(hr)) {
+        dxgsg9_cat.error() << "SetStreamSource failed" << D3DERRORSTRING(hr);
+      }
+    }
+
+    // The bit after the last array is set if the shader context wants us to
+    // bind the vertex buffer containing constants.
+    if (used_streams.get_bit(i)) {
+      // Has no vertex colors, so bind a vertex buffer with stride 0 and write
+      // our desired color value to it.
+      LPDIRECT3DVERTEXBUFFER9 vbuffer = get_constant_vbuffer(_scene_graph_color);
+      hr = device->SetStreamSource(i, vbuffer, 0, 0);
+      if (FAILED(hr)) {
+        dxgsg9_cat.error() << "SetStreamSource failed" << D3DERRORSTRING(hr);
+      }
+      if (num_instances != 1) {
+        _d3d_device->SetStreamSourceFreq(i, (D3DSTREAMSOURCE_INSTANCEDATA | 1));
+      }
+      ++i;
+    }
+
+    // Unbind any other streams.
+    for (; i < _num_bound_streams; ++i) {
+      _d3d_device->SetStreamSource(i, nullptr, 0, 0);
+    }
+
+    _num_bound_streams = used_streams.get_highest_on_bit() + 1;
+    _instancing_enabled = (num_instances != 1);
+
+    // Update transform/slider tables.
+    _current_shader_context->update_tables(this, _data_reader);
+  }
 
   return true;
 }
@@ -1296,24 +1342,24 @@ update_standard_vertex_arrays(bool force) {
   int fvf = 0;
   HRESULT hr;
 
-  int number_of_arrays = _data_reader->get_num_arrays();
-  for ( int array_index = 0; array_index < number_of_arrays; ++array_index ) {
-    const GeomVertexArrayDataHandle* array_reader = _data_reader->get_array_reader( array_index );
-    if ( array_reader == nullptr ) {
+  int num_arrays = _data_reader->get_num_arrays();
+  for (int array_index = 0; array_index < num_arrays; ++array_index) {
+    const GeomVertexArrayDataHandle *array_reader = _data_reader->get_array_reader(array_index);
+    if (array_reader == nullptr) {
       dxgsg9_cat.error() << "Unable to get reader for array " << array_index << "\n";
       return false;
     }
 
     // Get the vertex buffer for this array.
-    DXVertexBufferContext9* dvbc;
+    DXVertexBufferContext9 *dvbc;
     if (!setup_array_data(dvbc, array_reader, force)) {
       dxgsg9_cat.error() << "Unable to setup vertex buffer for array " << array_index << "\n";
       return false;
     }
 
     // Bind this array as the data source for the corresponding stream.
-    const GeomVertexArrayFormat* array_format = array_reader->get_array_format();
-    hr = _d3d_device->SetStreamSource( array_index, dvbc->_vbuffer, 0, array_format->get_stride() );
+    const GeomVertexArrayFormat *array_format = array_reader->get_array_format();
+    hr = _d3d_device->SetStreamSource(array_index, dvbc->_vbuffer, 0, array_format->get_stride());
     if (FAILED(hr)) {
       dxgsg9_cat.error() << "SetStreamSource failed" << D3DERRORSTRING(hr);
       return false;
@@ -1323,7 +1369,13 @@ update_standard_vertex_arrays(bool force) {
     fvf |= dvbc->_fvf;
   }
 
-  hr = _d3d_device->SetFVF( fvf );
+  for (int array_index = num_arrays; array_index < _num_bound_streams; ++array_index) {
+    _d3d_device->SetStreamSource(array_index, nullptr, 0, 0);
+  }
+
+  _num_bound_streams = num_arrays;
+
+  hr = _d3d_device->SetFVF(fvf);
   if (FAILED(hr)) {
     dxgsg9_cat.error() << "SetFVF failed" << D3DERRORSTRING(hr);
     return false;
@@ -1340,9 +1392,8 @@ update_standard_vertex_arrays(bool force) {
  */
 void DXGraphicsStateGuardian9::
 disable_standard_vertex_arrays() {
-  for ( int array_index = 0; array_index < _num_bound_streams; ++array_index )
-  {
-    _d3d_device->SetStreamSource( array_index, nullptr, 0, 0 );
+  for (int array_index = 0; array_index < _num_bound_streams; ++array_index) {
+    _d3d_device->SetStreamSource(array_index, nullptr, 0, 0);
   }
   _num_bound_streams = 0;
 }
@@ -2018,8 +2069,9 @@ do_framebuffer_copy_to_ram(Texture *tex, int view, int z,
     return false;
 
   default:
-    format = Texture::F_rgb;
+    format = Texture::has_alpha(format) ? Texture::F_rgba : Texture::F_rgb;
     component_type = Texture::T_unsigned_byte;
+    break;
   }
 
   Texture::TextureType texture_type;
@@ -2270,7 +2322,7 @@ reset() {
   // GR_point_sprite_tex_matrix.
   _supported_geom_rendering =
     Geom::GR_point | Geom::GR_point_uniform_size |
-    Geom::GR_point_perspective | Geom::GR_point_sprite |
+    Geom::GR_point_perspective | Geom::GR_point_sprite | Geom::GR_point_scale |
     Geom::GR_indexed_other |
     Geom::GR_triangle_strip | Geom::GR_triangle_fan |
     Geom::GR_flat_first_vertex |
@@ -2285,11 +2337,17 @@ reset() {
   // TransformState::make_identity()); want gsg to pass all state settings
   // down so any non-matching defaults we set here get overwritten
 
-  nassertv(_screen->_d3d9 != nullptr);
+  _shader_model = SM_00;
+  _supports_hlsl = false;
+  _supported_shader_caps = 0;
+  _supports_geometry_instancing = false;
+  _max_vertex_shader_parameter_vectors = 0;
 
-  if (_d3d_device == nullptr) {
+  if (_screen == nullptr || _d3d_device == nullptr) {
     return;
   }
+
+  nassertv(_screen->_d3d9 != nullptr);
 
   D3DCAPS9 d3d_caps;
   _d3d_device->GetDeviceCaps(&d3d_caps);
@@ -2299,12 +2357,29 @@ reset() {
   _pixel_shader_version_major = D3DSHADER_VERSION_MAJOR (d3d_caps.PixelShaderVersion);
   _pixel_shader_version_minor = D3DSHADER_VERSION_MINOR (d3d_caps.PixelShaderVersion);
 
-  _supports_hlsl = (_pixel_shader_version_major != 0);
+  // We require at least shader model 3.
+  _supports_hlsl = (_pixel_shader_version_major >= 3);
+
+  _supported_shader_caps = 0;
+  if (_supports_hlsl) {
+    _supported_shader_caps = Shader::C_basic_shader
+                           | Shader::C_standard_derivatives
+                           | Shader::C_shadow_samplers
+                           | Shader::C_non_square_matrices
+                           | Shader::C_texture_lod
+                           | Shader::C_draw_buffers;
+
+    _supports_geometry_instancing = true;
+  }
+
+  if (d3d_caps.VertexTextureFilterCaps != 0) {
+    _supported_shader_caps |= Shader::C_vertex_texture;
+  }
 
   _vertex_shader_profile = (char *) D3DXGetVertexShaderProfile (_d3d_device);
   _pixel_shader_profile = (char *) D3DXGetPixelShaderProfile (_d3d_device);
 
-  _vertex_shader_maximum_constants = d3d_caps.MaxVertexShaderConst;
+  _max_vertex_shader_parameter_vectors = d3d_caps.MaxVertexShaderConst;
 
   switch (_pixel_shader_version_major)
   {
@@ -2334,53 +2409,6 @@ reset() {
   }
 
   _auto_detect_shader_model = _shader_model;
-
-#ifdef HAVE_CG
-  set_cg_device(_d3d_device);
-
-  _cg_context = cgCreateContext();
-
-  if (cgD3D9IsProfileSupported(CG_PROFILE_PS_2_0) &&
-      cgD3D9IsProfileSupported(CG_PROFILE_VS_2_0)) {
-    _supports_basic_shaders = true;
-    _shader_caps._active_vprofile = (int)cgD3D9GetLatestVertexProfile();
-    _shader_caps._active_fprofile = (int)cgD3D9GetLatestPixelProfile();
-    _shader_caps._ultimate_vprofile = (int)CG_PROFILE_VS_3_0;
-    _shader_caps._ultimate_fprofile = (int)CG_PROFILE_PS_3_0;
-/*
-    _shader_caps._active_vprofile = (int)CG_PROFILE_VS_2_0;
-    _shader_caps._active_fprofile = (int)CG_PROFILE_PS_2_0;
-    _shader_caps._ultimate_vprofile = (int)CG_PROFILE_VS_2_0;
-    _shader_caps._ultimate_fprofile = (int)CG_PROFILE_PS_2_0;
-*/
-  }
-
-  if (dxgsg9_cat.is_debug()) {
-    CGprofile vertex_profile;
-    CGprofile pixel_profile;
-
-    vertex_profile = cgD3D9GetLatestVertexProfile();
-    pixel_profile = cgD3D9GetLatestPixelProfile();
-
-    const char *vertex_profile_str =
-      cgGetProfileString(vertex_profile);
-    const char *pixel_profile_str =
-      cgGetProfileString(pixel_profile);
-
-    if (vertex_profile_str == nullptr) {
-      vertex_profile_str = "(null)";
-    }
-    if (pixel_profile_str == nullptr) {
-      pixel_profile_str = "(null)";
-    }
-
-    dxgsg9_cat.debug()
-      << "\nCg latest vertex profile = " << vertex_profile_str << "  id = " << vertex_profile
-      << "\nCg latest pixel profile = " << pixel_profile_str << "  id = " << pixel_profile
-      << "\nshader model = " << _shader_model
-      << "\n";
-  }
-#endif
 
   _supports_stream_offset = (d3d_caps.DevCaps2 & D3DDEVCAPS2_STREAMOFFSET) != 0;
   _screen->_supports_dynamic_textures = ((d3d_caps.Caps2 & D3DCAPS2_DYNAMICTEXTURES) != 0);
@@ -2455,7 +2483,7 @@ reset() {
       << "\nD3DPRASTERCAPS_SLOPESCALEDEPTHBIAS = " << ((d3d_caps.RasterCaps & D3DPRASTERCAPS_SLOPESCALEDEPTHBIAS) != 0)
       << "\nVertexShaderVersion = " << _vertex_shader_version_major << "." << _vertex_shader_version_minor
       << "\nPixelShaderVersion = " << _pixel_shader_version_major << "." << _pixel_shader_version_minor
-      << "\nMaxVertexShaderConst = " << _vertex_shader_maximum_constants
+      << "\nMaxVertexShaderConst = " << _max_vertex_shader_parameter_vectors
       << "\nsupports_stream_offset = " << _supports_stream_offset
       << "\nsupports_dynamic_textures = " << _screen->_supports_dynamic_textures
       << "\nsupports_automatic_mipmap_generation = " << _screen->_supports_automatic_mipmap_generation
@@ -2567,6 +2595,7 @@ reset() {
   _max_clip_planes = (int)d3d_caps.MaxUserClipPlanes;
   _max_vertex_transforms = d3d_caps.MaxVertexBlendMatrices;
   _max_vertex_transform_indices = d3d_caps.MaxVertexBlendMatrixIndex;
+  _supports_fixed_function_vertex_blending = (_max_vertex_transforms > 0);
 
   set_render_state(D3DRS_AMBIENT, 0x0);
 
@@ -2737,8 +2766,6 @@ reset() {
 
   _current_shader = nullptr;
   _current_shader_context = nullptr;
-  _vertex_array_shader = nullptr;
-  _vertex_array_shader_context = nullptr;
   _texture_binding_shader = nullptr;
   _texture_binding_shader_context = nullptr;
 
@@ -2808,7 +2835,7 @@ do_issue_transform() {
 
   if (_current_shader_context) {
 // _current_shader_context->issue_transform(this);
-    _current_shader_context->issue_parameters(this, Shader::SSD_transform);
+    _current_shader_context->issue_parameters(this, Shader::D_transform);
 
 // ??? NO NEED TO SET THE D3D TRANSFORM VIA SetTransform SINCE THE TRANSFORM
 // IS ONLY USED IN THE SHADER
@@ -2860,9 +2887,9 @@ do_issue_alpha_test() {
 }
 
 /**
- *
+ * Returns true if the shader was replaced.
  */
-void DXGraphicsStateGuardian9::
+bool DXGraphicsStateGuardian9::
 do_issue_shader() {
 
   DXShaderContext9 *context = 0;
@@ -2881,7 +2908,7 @@ do_issue_shader() {
       _current_shader_context = 0;
       disable_standard_texture_bindings();
     }
-    return;
+    return false;
   }
 
   if (context != _current_shader_context) {
@@ -2892,16 +2919,17 @@ do_issue_shader() {
       _current_shader_context = 0;
       _current_shader = 0;
       disable_standard_texture_bindings();
+      _matrix_cache.clear();
     }
     if (context != 0) {
       context->bind(this);
       _current_shader = shader;
       _current_shader_context = context;
+      _matrix_cache.resize(shader->get_matrix_cache_size());
+      return true;
     }
-  } else {
-    // Use the same shader as before, but with new input arguments.
-    context->issue_parameters(this, Shader::SSD_shaderinputs);
   }
+  return false;
 }
 
 /**
@@ -3128,19 +3156,25 @@ set_state_and_transform(const RenderState *target,
   _state_pcollector.add_level(1);
   PStatTimer timer1(_draw_set_state_pcollector);
 
+  int shader_deps = 0;
   if (transform != _internal_transform) {
     // PStatTimer timer(_draw_set_state_transform_pcollector);
     _state_pcollector.add_level(1);
     _internal_transform = transform;
     do_issue_transform();
+    shader_deps |= Shader::D_transform;
   }
 
   if (target == _state_rs && (_state_mask | _inv_state_mask).is_all_on()) {
+    if (shader_deps != 0 && _current_shader_context != nullptr) {
+      update_shader_matrix_cache(_current_shader, &_matrix_cache[0], ~0);
+
+      _current_shader_context->issue_parameters(this, shader_deps);
+    }
     return;
   }
   _target_rs = target;
 
-  int shader_deps = 0;
   determine_target_shader();
 
   int alpha_test_slot = AlphaTestAttrib::get_class_slot();
@@ -3170,7 +3204,7 @@ set_state_and_transform(const RenderState *target,
     do_issue_color_scale();
     _state_mask.set_bit(color_slot);
     _state_mask.set_bit(color_scale_slot);
-    shader_deps |= Shader::SSD_color | Shader::SSD_colorscale;
+    shader_deps |= Shader::D_color | Shader::D_colorscale;
   }
 
   int cull_face_slot = CullFaceAttrib::get_class_slot();
@@ -3211,7 +3245,7 @@ set_state_and_transform(const RenderState *target,
     // PStatTimer timer(_draw_set_state_render_mode_pcollector);
     do_issue_render_mode();
     _state_mask.set_bit(render_mode_slot);
-    shader_deps |= Shader::SSD_render_mode;
+    shader_deps |= Shader::D_render_mode;
   }
 
   int rescale_normal_slot = RescaleNormalAttrib::get_class_slot();
@@ -3252,10 +3286,19 @@ set_state_and_transform(const RenderState *target,
   if (_target_shader != _state_shader ||
       !_state_mask.get_bit(shader_slot)) {
     // PStatTimer timer(_draw_set_state_shader_pcollector);
-    do_issue_shader();
+    Shader *prev_shader = _current_shader;
+    if (do_issue_shader()) {
+      // Respecify everything after binding a shader.
+      shader_deps |= Shader::D_frame |
+                     Shader::D_scene |
+                     Shader::D_state |
+                     Shader::D_transform |
+                     Shader::D_projection;
+    }
     _state_shader = _target_shader;
     _state_mask.clear_bit(TextureAttrib::get_class_slot());
     _state_mask.set_bit(shader_slot);
+    shader_deps |= Shader::D_shader_inputs;
   }
 
   int texture_slot = TextureAttrib::get_class_slot();
@@ -3275,7 +3318,7 @@ set_state_and_transform(const RenderState *target,
     _state_mask.set_bit(texture_slot);
     _state_mask.set_bit(tex_matrix_slot);
     _state_mask.set_bit(tex_gen_slot);
-    shader_deps |= Shader::SSD_tex_matrix | Shader::SSD_tex_gen;
+    shader_deps |= Shader::D_tex_matrix | Shader::D_tex_gen;
   }
 
   int material_slot = MaterialAttrib::get_class_slot();
@@ -3284,7 +3327,7 @@ set_state_and_transform(const RenderState *target,
     // PStatTimer timer(_draw_set_state_material_pcollector);
     do_issue_material();
     _state_mask.set_bit(material_slot);
-    shader_deps |= Shader::SSD_material;
+    shader_deps |= Shader::D_material;
   }
 
   int light_slot = LightAttrib::get_class_slot();
@@ -3309,7 +3352,7 @@ set_state_and_transform(const RenderState *target,
     // PStatTimer timer(_draw_set_state_fog_pcollector);
     do_issue_fog();
     _state_mask.set_bit(fog_slot);
-    shader_deps |= Shader::SSD_fog;
+    shader_deps |= Shader::D_fog;
   }
 
   int scissor_slot = ScissorAttrib::get_class_slot();
@@ -3321,6 +3364,8 @@ set_state_and_transform(const RenderState *target,
   }
 
   if (_current_shader_context != nullptr && shader_deps != 0) {
+    update_shader_matrix_cache(_current_shader, &_matrix_cache[0], ~0);
+
     _current_shader_context->issue_parameters(this, shader_deps);
   }
 
@@ -3339,7 +3384,7 @@ bind_light(PointLight *light_obj, const NodePath &light, int light_id) {
   // coordinate system.
   CPT(TransformState) transform = light.get_transform(_scene_setup->get_camera_path());
   const LMatrix4 &light_mat = transform->get_mat();
-  LMatrix4 rel_mat = light_mat * LMatrix4::convert_mat(CS_yup_left, CS_default);
+  LMatrix4 rel_mat = light_mat * LMatrix4::convert_mat(_internal_coordinate_system, CS_default);
   LPoint3f pos = LCAST(float, light_obj->get_point() * rel_mat);
 
   D3DCOLORVALUE black;
@@ -3389,7 +3434,7 @@ bind_light(DirectionalLight *light_obj, const NodePath &light, int light_id) {
     // to DX's coordinate system.
     CPT(TransformState) transform = light.get_transform(_scene_setup->get_camera_path());
     const LMatrix4 &light_mat = transform->get_mat();
-    LMatrix4 rel_mat = light_mat * LMatrix4::convert_mat(CS_yup_left, CS_default);
+    LMatrix4 rel_mat = light_mat * LMatrix4::convert_mat(_internal_coordinate_system, CS_default);
     LVector3f dir = LCAST(float, light_obj->get_direction() * rel_mat);
 
     D3DCOLORVALUE black;
@@ -3440,7 +3485,7 @@ bind_light(Spotlight *light_obj, const NodePath &light, int light_id) {
   // coordinate system.
   CPT(TransformState) transform = light.get_transform(_scene_setup->get_camera_path());
   const LMatrix4 &light_mat = transform->get_mat();
-  LMatrix4 rel_mat = light_mat * LMatrix4::convert_mat(CS_yup_left, CS_default);
+  LMatrix4 rel_mat = light_mat * LMatrix4::convert_mat(_internal_coordinate_system, CS_default);
   LPoint3f pos = LCAST(float, lens->get_nodal_point() * rel_mat);
   LVector3f dir = LCAST(float, lens->get_view_vector() * rel_mat);
 
@@ -4005,7 +4050,7 @@ bind_clip_plane(const NodePath &plane, int plane_id) {
   // coordinate system.
   CPT(TransformState) transform = plane.get_transform(_scene_setup->get_camera_path());
   const LMatrix4 &plane_mat = transform->get_mat();
-  LMatrix4 rel_mat = plane_mat * LMatrix4::convert_mat(CS_yup_left, CS_default);
+  LMatrix4 rel_mat = plane_mat * LMatrix4::convert_mat(_internal_coordinate_system, CS_default);
   const PlaneNode *plane_node;
   DCAST_INTO_V(plane_node, plane.node());
   LPlanef world_plane = LCAST(float, plane_node->get_plane() * rel_mat);
@@ -4050,19 +4095,6 @@ close_gsg() {
 }
 
 /**
- * Frees some memory that was explicitly allocated within the dxgsg.
- */
-void DXGraphicsStateGuardian9::
-free_nondx_resources() {
-#ifdef HAVE_CG
-  if (_cg_context) {
-    cgDestroyContext(_cg_context);
-    _cg_context = 0;
-  }
-#endif
-}
-
-/**
  * setup for re-calling dx_init(), this is not the final exit cleanup routine
  * (see dx_cleanup)
  */
@@ -4088,8 +4120,6 @@ free_d3d_device() {
   if (_d3d_device != nullptr) {
     RELEASE(_d3d_device, dxgsg9, "d3dDevice", RELEASE_DOWN_TO_ZERO);
   }
-
-  free_nondx_resources();
 
   // obviously we dont release ID3D9, just ID3DDevice9
 }
@@ -4327,7 +4357,6 @@ set_context(DXScreenData *new_context) {
   _swap_chain = _screen->_swap_chain;   //copy this one field for speed of deref
 
   _screen->_dxgsg9 = this;
-  set_cg_device(_d3d_device);
 }
 
 /**
@@ -4443,21 +4472,21 @@ set_texture_blend_mode(int i, const TextureStage *stage) {
         (i, D3DTSS_COLORARG0,
          get_texture_argument(stage->get_combine_rgb_source2(),
                               stage->get_combine_rgb_operand2()));
-      // fall through
+      [[fallthrough]];
 
     case 2:
       set_texture_stage_state
         (i, D3DTSS_COLORARG2,
          get_texture_argument(stage->get_combine_rgb_source1(),
                               stage->get_combine_rgb_operand1()));
-      // fall through
+      [[fallthrough]];
 
     case 1:
       set_texture_stage_state
         (i, D3DTSS_COLORARG1,
          get_texture_argument(stage->get_combine_rgb_source0(),
                               stage->get_combine_rgb_operand0()));
-      // fall through
+      [[fallthrough]];
 
     default:
       break;
@@ -4474,21 +4503,21 @@ set_texture_blend_mode(int i, const TextureStage *stage) {
         (i, D3DTSS_ALPHAARG0,
          get_texture_argument(stage->get_combine_alpha_source2(),
                               stage->get_combine_alpha_operand2()));
-      // fall through
+      [[fallthrough]];
 
     case 2:
       set_texture_stage_state
         (i, D3DTSS_ALPHAARG2,
          get_texture_argument(stage->get_combine_alpha_source1(),
                               stage->get_combine_alpha_operand1()));
-      // fall through
+      [[fallthrough]];
 
     case 1:
       set_texture_stage_state
         (i, D3DTSS_ALPHAARG1,
          get_texture_argument(stage->get_combine_alpha_source0(),
                               stage->get_combine_alpha_operand0()));
-      // fall through
+      [[fallthrough]];
 
     default:
       break;
@@ -4542,7 +4571,6 @@ dx_cleanup() {
     return;
   }
 
-  free_nondx_resources();
   PRINT_REFCNT(dxgsg9, _d3d_device);
 
   // Do a safe check for releasing the D3DDEVICE. RefCount should be zero.  if
@@ -4610,9 +4638,9 @@ reset_d3d_device(D3DPRESENT_PARAMETERS *presentation_params,
     release_all_vertex_buffers();
     release_all_index_buffers();
 
-    if (_white_vbuffer != nullptr) {
-      _white_vbuffer->Release();
-      _white_vbuffer = nullptr;
+    if (_constant_vbuffer != nullptr) {
+      _constant_vbuffer->Release();
+      _constant_vbuffer = nullptr;
     }
 
     // must be called before reset
@@ -5261,7 +5289,7 @@ FrameBufferProperties DXGraphicsStateGuardian9::
 calc_fb_properties(DWORD cformat, DWORD dformat,
                    DWORD multisampletype, DWORD multisamplequality) {
   FrameBufferProperties props;
-  int index=0;
+  int index=0, isfloat=0;
   int r=0, g=0, b=0, a=0;
   switch (cformat) {
   case D3DFMT_R8G8B8:      r=8; g=8; b=8; a=0; break;
@@ -5275,9 +5303,18 @@ calc_fb_properties(DWORD cformat, DWORD dformat,
   case D3DFMT_A8R3G3B2:    r=3; g=3; b=2; a=8; break;
   case D3DFMT_X4R4G4B4:    r=4; g=4; b=4; a=0; break;
   case D3DFMT_A2B10G10R10: r=10;g=10;b=10;a=2; break;
+  case D3DFMT_R16F:        r=16; isfloat=1; break;
+  case D3DFMT_G16R16F:     r=16; isfloat=1; break;
+  case D3DFMT_A16B16G16R16F:r=16; g=16; b=16; a=16; isfloat=1; break;
+  case D3DFMT_R32F:        r=32; isfloat=1; break;
+  case D3DFMT_G32R32F:     r=32; isfloat=1; break;
+  case D3DFMT_A32B32G32R32F:r=32; g=32; b=32; a=32; isfloat=1; break;
   case D3DFMT_A8P8:        index=8; a=8; break;
   case D3DFMT_P8:          index=8; a=0; break;
   default: break;
+  }
+  if (isfloat > 0) {
+    props.set_float_color(true);
   }
   if (index > 0) {
     props.set_rgb_color(0);
@@ -5450,76 +5487,59 @@ restore_gamma() {
  */
 void DXGraphicsStateGuardian9::
 atexit_function(void) {
-  set_cg_device(nullptr);
   if (_gamma_changed) {
     static_set_gamma(true, 1.0f);
   }
 }
 
 /**
- * Returns true if this particular GSG supports the specified Cg Shader
- * Profile.
- */
-bool DXGraphicsStateGuardian9::
-get_supports_cg_profile(const std::string &name) const {
-#ifndef HAVE_CG
-  return false;
-#else
-  CGprofile profile = cgGetProfile(name.c_str());
-
-  if (profile == CG_PROFILE_UNKNOWN) {
-    dxgsg9_cat.error() << name <<", unknown Cg-profile\n";
-    return false;
-  }
-  return cgD3D9IsProfileSupported(cgGetProfile(name.c_str())) != 0;
-#endif  // HAVE_CG
-}
-
-/**
- * Sets the global Cg device pointer.  TODO: make this thread-safe somehow.
- * Maybe Cg is inherently not thread-safe.
- */
-void DXGraphicsStateGuardian9::
-set_cg_device(LPDIRECT3DDEVICE9 cg_device) {
-#ifdef HAVE_CG
-  if (_cg_device != cg_device) {
-    cgD3D9SetDevice(cg_device);
-    _cg_device = cg_device;
-  }
-#endif // HAVE_CG
-}
-
-/**
- * Returns a vertex buffer containing only a full-white color.
+ * Returns a vertex buffer containing certain constant values.
  */
 LPDIRECT3DVERTEXBUFFER9 DXGraphicsStateGuardian9::
-get_white_vbuffer() {
-  if (_white_vbuffer != nullptr) {
-    return _white_vbuffer;
-  }
+get_constant_vbuffer(const LColor &color) {
+  LPDIRECT3DVERTEXBUFFER9 vbuffer = _constant_vbuffer;
 
-  LPDIRECT3DVERTEXBUFFER9 vbuffer;
+  // The buffer consists of the following:
+  // 4 bytes of current vertex color
+  // 4 bytes of 0 1 2 3 (used for transform_index)
+  // 12 bytes of the identity matrix (used for instance_matrix)
+  // Last row of identity matrix is (0, 0, 0, 1), so doesn't need to be stored
+  static const size_t size = 4 + 4 + 4 * 3;
+
+  D3DCOLOR cval = LColor_to_D3DCOLOR(color);
+
   HRESULT hr;
-  hr = _screen->_d3d_device->CreateVertexBuffer(sizeof(D3DCOLOR), D3DUSAGE_WRITEONLY, D3DFVF_DIFFUSE, D3DPOOL_DEFAULT, &vbuffer, nullptr);
+  if (vbuffer == nullptr) {
+    hr = _screen->_d3d_device->CreateVertexBuffer(size, D3DUSAGE_WRITEONLY, D3DFVF_DIFFUSE, D3DPOOL_DEFAULT, &vbuffer, nullptr);
 
-  if (FAILED(hr)) {
-    dxgsg9_cat.error()
-      << "CreateVertexBuffer failed" << D3DERRORSTRING(hr);
-    return nullptr;
+    if (FAILED(hr)) {
+      dxgsg9_cat.error()
+        << "CreateVertexBuffer failed" << D3DERRORSTRING(hr);
+      return nullptr;
+    }
+
+    _constant_vbuffer = vbuffer;
+    _constant_vbuffer_color = ~cval;
   }
 
-  D3DCOLOR *local_pointer;
-  hr = vbuffer->Lock(0, sizeof(D3DCOLOR), (void **) &local_pointer, D3DLOCK_DISCARD);
-  if (FAILED(hr)) {
-    dxgsg9_cat.error()
-      << "VertexBuffer::Lock failed" << D3DERRORSTRING(hr);
-    return false;
+  if (cval != _constant_vbuffer_color) {
+    uint32_t *local_pointer;
+    hr = vbuffer->Lock(0, size, (void **)&local_pointer, D3DLOCK_DISCARD);
+    if (FAILED(hr)) {
+      dxgsg9_cat.error()
+        << "VertexBuffer::Lock failed" << D3DERRORSTRING(hr);
+      return false;
+    }
+
+    local_pointer[0] = cval;
+    local_pointer[1] = 0x03020100;
+    local_pointer[2] = 0x000000ff;
+    local_pointer[3] = 0x0000ff00;
+    local_pointer[4] = 0x00ff0000;
+    vbuffer->Unlock();
+
+    _constant_vbuffer_color = cval;
   }
-
-  *local_pointer = D3DCOLOR_ARGB(255, 255, 255, 255);
-
-  vbuffer->Unlock();
-  _white_vbuffer = vbuffer;
   return vbuffer;
 }
 

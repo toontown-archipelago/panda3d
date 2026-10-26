@@ -12,16 +12,6 @@
  */
 
 /**
- * Creates an empty CullableObject whose pointers can be filled in later.
- */
-INLINE CullableObject::
-CullableObject() {
-#ifdef DO_MEMORY_USAGE
-  MemoryUsage::record_pointer(this, get_class_type());
-#endif
-}
-
-/**
  * Creates a CullableObject based the indicated geom, with the indicated
  * render state and transform.
  */
@@ -32,9 +22,6 @@ CullableObject(CPT(Geom) geom, CPT(RenderState) state,
   _state(std::move(state)),
   _internal_transform(std::move(internal_transform))
 {
-#ifdef DO_MEMORY_USAGE
-  MemoryUsage::record_pointer(this, get_class_type());
-#endif
 }
 
 /**
@@ -47,9 +34,6 @@ CullableObject(const CullableObject &copy) :
   _state(copy._state),
   _internal_transform(copy._internal_transform)
 {
-#ifdef DO_MEMORY_USAGE
-  MemoryUsage::record_pointer(this, get_class_type());
-#endif
 }
 
 /**
@@ -82,14 +66,13 @@ draw(GraphicsStateGuardianBase *gsg, bool force, Thread *current_thread) {
     }
     // Now the callback has taken care of drawing.
   }
-  else if (LIKELY(_instances == nullptr)) {
+  else if (LIKELY(_instances == nullptr || gsg->state_supports_instancing())) {
     nassertv(_geom != nullptr);
     gsg->set_state_and_transform(_state, _internal_transform);
     draw_inline(gsg, force, current_thread);
   }
   else {
-    // It has an instance list left over (not munged into vertex data), which
-    // means the shader doesn't implement instancing.  Just render the object
+    // The GSG doesn't support shader instancing, so we just render the object
     // more than once.
     nassertv(_geom != nullptr);
     GeomPipelineReader geom_reader(_geom, current_thread);
@@ -98,7 +81,7 @@ draw(GraphicsStateGuardianBase *gsg, bool force, Thread *current_thread) {
 
     for (const InstanceList::Instance &instance : *_instances) {
       gsg->set_state_and_transform(_state, _internal_transform->compose(instance.get_transform()));
-      geom_reader.draw(gsg, &data_reader, _num_instances, force);
+      geom_reader.draw(gsg, &data_reader, nullptr, force);
     }
   }
 }
@@ -145,7 +128,7 @@ flush_level() {
  */
 INLINE void CullableObject::
 draw_inline(GraphicsStateGuardianBase *gsg, bool force, Thread *current_thread) {
-  _geom->draw(gsg, _munged_data, _num_instances, force, current_thread);
+  _geom->draw(gsg, _munged_data, _instances, force, current_thread);
 }
 
 /**

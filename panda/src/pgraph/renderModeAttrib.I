@@ -83,6 +83,10 @@ get_geom_rendering(int geom_rendering) const {
     } else if (_thickness != 1.0f) {
       geom_rendering |= Geom::GR_point_uniform_size;
     }
+  } else if (_thickness != 1.0f) {
+    // This only matters if the geometry consists of lines, or is rendered
+    // in wireframe mode.
+    geom_rendering |= Geom::GR_line_thickness;
   }
 
   return geom_rendering;

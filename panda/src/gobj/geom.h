@@ -67,7 +67,7 @@ PUBLISHED:
 
   void operator = (const Geom &copy) = delete;
 
-  virtual Geom *make_copy() const;
+  [[nodiscard]] virtual Geom *make_copy() const;
 
   INLINE PrimitiveType get_primitive_type() const;
   INLINE ShadeModel get_shade_model() const;
@@ -161,7 +161,7 @@ public:
   bool is_in_view(const BoundingVolume *view_frustum, Thread *current_thread) const;
 
   bool draw(GraphicsStateGuardianBase *gsg,
-            const GeomVertexData *vertex_data, size_t num_instances,
+            const GeomVertexData *vertex_data, const InstanceList *instances,
             bool force, Thread *current_thread) const;
 
   INLINE void calc_tight_bounds(LPoint3 &min_point, LPoint3 &max_point,
@@ -438,7 +438,7 @@ public:
 
   bool draw(GraphicsStateGuardianBase *gsg,
             const GeomVertexDataPipelineReader *data_reader,
-            size_t num_instances, bool force) const;
+            const InstanceList *instances, bool force) const;
 
 private:
   const Geom *_object;

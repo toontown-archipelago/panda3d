@@ -31,7 +31,7 @@
 class EXPCL_TINYDISPLAY TinySDLGraphicsWindow : public GraphicsWindow {
 public:
   TinySDLGraphicsWindow(GraphicsEngine *engine, GraphicsPipe *pipe,
-                        const std::string &name,
+                        std::string name,
                         const FrameBufferProperties &fb_prop,
                         const WindowProperties &win_prop,
                         int flags,
@@ -62,6 +62,8 @@ private:
   ZBuffer *_frame_buffer;
   unsigned int _flags;
   unsigned int _pitch;
+
+  GraphicsWindowInputDevice *_input;
 
 public:
   static TypeHandle get_class_type() {
