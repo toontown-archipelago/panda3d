@@ -91,7 +91,12 @@ jobs:
             --archipelago \
             --python-incdir="$pythonLocation/include" \
             --python-libdir="$pythonLocation/lib"
-
+          python makepanda/makepanda.py \
+            --wheel \
+            --threads=4 \
+            --archipelago \
+            --universal
+            
       - name: Upload Binaries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
